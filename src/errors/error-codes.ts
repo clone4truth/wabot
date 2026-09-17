@@ -1,0 +1,33 @@
+export enum ErrorCode {
+  INVALID_COMMAND = 'INVALID_COMMAND',
+  UNSUPPORTED_INPUT = 'UNSUPPORTED_INPUT',
+  TEXT_TOO_LONG = 'TEXT_TOO_LONG',
+  MEDIA_TOO_LARGE = 'MEDIA_TOO_LARGE',
+  VIDEO_TOO_LONG = 'VIDEO_TOO_LONG',
+  MEDIA_DOWNLOAD_FAILED = 'MEDIA_DOWNLOAD_FAILED',
+  MEDIA_DECODE_FAILED = 'MEDIA_DECODE_FAILED',
+  PROCESSING_TIMEOUT = 'PROCESSING_TIMEOUT',
+  RATE_LIMITED = 'RATE_LIMITED',
+  WAHA_SEND_FAILED = 'WAHA_SEND_FAILED',
+  INVALID_WEBHOOK_SIGNATURE = 'INVALID_WEBHOOK_SIGNATURE',
+  MEDIA_NOT_AVAILABLE = 'MEDIA_NOT_AVAILABLE',
+  UNSUPPORTED_STICKER_TYPE = 'UNSUPPORTED_STICKER_TYPE',
+  TEMP_FILE_CLEANUP_FAILED = 'TEMP_FILE_CLEANUP_FAILED',
+}
+
+export const userMessages: Record<ErrorCode, string> = {
+  [ErrorCode.INVALID_COMMAND]: '❌ Perintah tidak dikenal. Gunakan !menu untuk daftar command.',
+  [ErrorCode.UNSUPPORTED_INPUT]: '❌ Reply teks, foto, video, atau sticker yang didukung.',
+  [ErrorCode.TEXT_TOO_LONG]: `❌ Teks maksimal ${300} karakter.`,
+  [ErrorCode.MEDIA_TOO_LARGE]: '❌ Ukuran gambar terlalu besar.',
+  [ErrorCode.VIDEO_TOO_LONG]: '❌ Video maksimal 10 detik.',
+  [ErrorCode.MEDIA_DOWNLOAD_FAILED]: '❌ Gagal mengunduh media dari WAHA.',
+  [ErrorCode.MEDIA_DECODE_FAILED]: '❌ Format media tidak didukung atau rusak.',
+  [ErrorCode.PROCESSING_TIMEOUT]: '⏳ Proses stiker melebihi batas waktu. Coba lagi.',
+  [ErrorCode.RATE_LIMITED]: '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.',
+  [ErrorCode.WAHA_SEND_FAILED]: '❌ Gagal mengirim stiker ke WAHA.',
+  [ErrorCode.INVALID_WEBHOOK_SIGNATURE]: '❌ Webhook tidak valid.',
+  [ErrorCode.MEDIA_NOT_AVAILABLE]: '❌ Media dari pesan yang direply tidak tersedia.',
+  [ErrorCode.UNSUPPORTED_STICKER_TYPE]: '❌ Tipe sticker tidak didukung untuk konversi ini.',
+  [ErrorCode.TEMP_FILE_CLEANUP_FAILED]: '⚠️ Gagal membersihkan file sementara.',
+};

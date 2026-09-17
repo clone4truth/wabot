@@ -1,0 +1,23 @@
+services:
+  sticker-bot:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - WAHA_BASE_URL=http://waha:3001
+      - APP_ENV=production
+      - LOG_LEVEL=warn
+    depends_on:
+      - waha
+    restart: unless-stopped
+
+  waha:
+    image: devlikeapro/waha:latest
+    ports:
+      - "3001:3001"
+    environment:
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - WAHA_SESSION=${WAHA_SESSION}
+    restart: unless-stopped

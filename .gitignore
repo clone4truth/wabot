@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+.idea/
+.vscode/
+*.pem
+*.secret
+npm-debug.log*
+sharp-*
+ffmpeg-*
