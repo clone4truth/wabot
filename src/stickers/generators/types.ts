@@ -18,7 +18,10 @@ export interface GeneratorInput {
   mimetype?: string;
   options?: Record<string, unknown>;
   content?: Record<string, unknown>;
+  /** Remaining processing budget (ms) propagated from JobManager. */
   timeoutMs?: number;
+  /** Cancellation signal propagated from JobManager / external caller. */
+  signal?: AbortSignal;
 }
 
 export interface StickerGenerator {

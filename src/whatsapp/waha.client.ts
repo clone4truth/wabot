@@ -4,6 +4,7 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { logger } from '../observability/logger';
 import { hashIdentifier } from '../observability/privacy';
+import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
 
 // Klien WAHA mengikuti docs resmi: POST /api/<action> dengan session di body JSON.
 export class WAHAClient {
@@ -223,6 +224,7 @@ export class WAHAClient {
   }
 
   // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.
+  // Menggunakan SSRF-safe fetcher untuk URL picture yang dikembalikan WAHA.
   async getProfilePicture(chatId: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
     try {
       const controller = new AbortController();
@@ -233,29 +235,28 @@ export class WAHAClient {
       );
       clearTimeout(timeout);
       if (!res.ok) return null;
-      const { url } = (await res.json()) as { url?: string | null };
-      if (!url) return null;
-      return this.fetchImage(url);
+      const data = (await res.json()) as any;
+      // WAHA Swagger: response field adalah `pictureUrl` (bukan `url`).
+      // Fallback ke `url` untuk kompatibilitas deployment lama.
+      const pictureUrl: string | null | undefined = data?.pictureUrl ?? data?.url;
+      if (!pictureUrl) return null;
+      return this.fetchExternalImage(pictureUrl);
     } catch {
       return null;
     }
   }
 
-  // Best-effort: download gambar dari URL. null bila gagal.
+  // Best-effort: download gambar dari URL eksternal menggunakan SSRF-safe fetcher.
+  // Mengembalikan null bila URL private/tidak valid/gagal.
+  async fetchExternalImage(url: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    return fetchExternalImageSafe(url, { timeoutMs: 5_000, maxBytes: 2 * 1024 * 1024 });
+  }
+
+  /**
+   * @deprecated Gunakan fetchExternalImage untuk URL eksternal.
+   * Method ini dipertahankan untuk backward-compat internal caller.
+   */
   async fetchImage(url: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const imgRes = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!imgRes.ok) return null;
-      const mimetype = imgRes.headers.get('content-type') || 'image/jpeg';
-      if (!mimetype.startsWith('image/')) return null;
-      const buffer = Buffer.from(await imgRes.arrayBuffer());
-      if (buffer.length === 0 || buffer.length > 2 * 1024 * 1024) return null;
-      return { buffer, mimetype };
-    } catch {
-      return null;
-    }
+    return this.fetchExternalImage(url);
   }
 }

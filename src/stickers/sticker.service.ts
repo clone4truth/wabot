@@ -86,7 +86,15 @@ export class StickerService {
       const raw = await this.jobManager.execute(
         jobType,
         ownerHash,
-        () => generator.process(generatorInput, context),
+        (ctx) => {
+          // Propagate remaining deadline + cancellation signal into the generator.
+          const effectiveInput: GeneratorInput = {
+            ...generatorInput,
+            timeoutMs: ctx?.remainingTimeoutMs ?? timeoutMs,
+            signal: ctx?.signal,
+          };
+          return generator.process(effectiveInput, context);
+        },
         { timeoutMs },
       );
 

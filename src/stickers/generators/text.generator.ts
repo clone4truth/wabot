@@ -70,7 +70,7 @@ export class TextGenerator implements StickerGenerator {
     let avatar = null;
     if (waha) {
       if (sender?.info?.picture) {
-        avatar = await waha.fetchImage(sender.info.picture).catch(() => null);
+        avatar = await waha.fetchExternalImage(sender.info.picture).catch(() => null);
       }
       if (!avatar && senderId) {
         avatar = await waha.getProfilePicture(senderId).catch(() => null);
