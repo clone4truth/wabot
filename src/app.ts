@@ -69,8 +69,9 @@ h1 { font-size: 24px; margin-bottom: 24px; color: #38bdf8; }
 <h2>Status</h2>
 <div class="status">
 <div class="dot" id="statusDot"></div>
-<span id="statusText">Online</span>
+<span id="statusText">Loading...</span>
 </div>
+<div id="wahaStatus" style="margin-top:8px;font-size:13px;color:#94a3b8"></div>
 </div>
 
 <div class="card">
@@ -153,8 +154,31 @@ function filterLogs(tab) {
   fetchLogs();
 }
 
+async function fetchHealth() {
+  try {
+    const res = await fetch('/health');
+    const data = await res.json();
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    const waha = document.getElementById('wahaStatus');
+    if (data.status === 'ok') {
+      dot.className = 'dot';
+      text.textContent = 'Online';
+    } else {
+      dot.className = 'dot offline';
+      text.textContent = 'Degraded';
+    }
+    waha.textContent = 'WAHA: ' + data.waha + ' (' + data.wahaUrl + ')';
+    waha.style.color = data.waha === 'connected' ? '#22c55e' : '#ef4444';
+  } catch(e) {
+    document.getElementById('statusText').textContent = 'Error';
+  }
+}
+
 fetchLogs();
 setInterval(fetchLogs, 5000);
+fetchHealth();
+setInterval(fetchHealth, 30000);
 </script>
 </body>
 </html>`;

@@ -1,5 +1,31 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import fetch from 'node-fetch';
+import env from '../config/env';
 
 export async function healthController(_req: FastifyRequest, reply: FastifyReply) {
-  return reply.status(200).send({ status: 'ok', uptime: process.uptime() });
+  const wahaOk = await checkWAHA();
+  const overall = wahaOk ? 'ok' : 'degraded';
+
+  return reply.status(wahaOk ? 200 : 503).send({
+    status: overall,
+    uptime: process.uptime(),
+    waha: wahaOk ? 'connected' : 'unreachable',
+    wahaUrl: env.wahaBaseUrl,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+async function checkWAHA(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${env.wahaBaseUrl}/api/sendText/default`, {
+      method: 'POST',
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return res.status >= 200 && res.status < 500;
+  } catch {
+    return false;
+  }
 }
