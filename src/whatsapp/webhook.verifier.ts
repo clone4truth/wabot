@@ -4,6 +4,34 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 
 export class WebhookVerifier {
+  // Verifikasi format WAHA: header X-Webhook-Hmac = hex HMAC atas raw body,
+  // algoritma default sha512 (lihat docs WAHA: X-Webhook-Hmac-Algorithm).
+  verifyWaha(body: string, hmacHex: string, algorithm = 'sha512'): { valid: boolean; expected?: string; received?: string } {
+    if (!env.wahaWebhookHmacKey) {
+      return { valid: true };
+    }
+
+    const sig = hmacHex.trim();
+    let expected: string;
+    try {
+      expected = crypto.createHmac(algorithm, env.wahaWebhookHmacKey).update(body).digest('hex');
+    } catch {
+      return { valid: false, received: sig };
+    }
+
+    if (sig.length !== expected.length) {
+      return { valid: false, expected, received: sig };
+    }
+
+    try {
+      const valid = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+      return { valid, expected, received: sig };
+    } catch {
+      return { valid: false, expected, received: sig };
+    }
+  }
+
+  // Kompatibilitas format GitHub/Meta: "sha256=<hex>" dengan HMAC-SHA256.
   verify(body: string, signature: string): { valid: boolean; expected?: string; received?: string } {
     if (!env.wahaWebhookHmacKey) {
       return { valid: true };

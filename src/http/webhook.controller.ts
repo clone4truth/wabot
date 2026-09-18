@@ -32,19 +32,28 @@ commandRouter.register('togif', createTogifHandler(stickerService));
 
 export async function webhookController(request: FastifyRequest, reply: FastifyReply) {
   const startTime = Date.now();
-  const body = JSON.stringify(request.body);
 
   try {
+    const rawBodyBuf = (request as any).rawBody as Buffer | undefined;
+    const body = rawBodyBuf?.toString('utf8') ?? JSON.stringify(request.body);
+
     verifier.validateBodySize(body);
 
-    const sigHeader = (request.headers['x-hub-signature-256'] as string | undefined) || '';
+    const wahaHmac = (request.headers['x-webhook-hmac'] as string | undefined) || '';
+    const wahaAlgo = (request.headers['x-webhook-hmac-algorithm'] as string | undefined) || 'sha512';
+    const hubSig = (request.headers['x-hub-signature-256'] as string | undefined) || '';
 
-    if (sigHeader && env.wahaWebhookHmacKey) {
-      const verifyResult = verifier.verify(body, sigHeader);
+    // WAHA hanya mengirim header HMAC bila HMAC Key diisi. Tanpa header = lewati verifikasi.
+    if (env.wahaWebhookHmacKey && (wahaHmac || hubSig)) {
+      const verifyResult = wahaHmac
+        ? verifier.verifyWaha(body, wahaHmac, wahaAlgo)
+        : verifier.verify(body, hubSig);
       if (!verifyResult.valid) {
         logger.warn('Invalid webhook signature', {
           requestId: request.id,
-          sigHeader: sigHeader.slice(0, 20),
+          wahaAlgo,
+          wahaHmacPrefix: wahaHmac ? wahaHmac.slice(0, 20) : '(empty)',
+          hubSigPrefix: hubSig ? hubSig.slice(0, 20) : '(empty)',
           expectedPrefix: verifyResult.expected?.slice(0, 20) || 'N/A',
           receivedPrefix: verifyResult.received?.slice(0, 20) || 'N/A',
           bodyLength: body.length,
