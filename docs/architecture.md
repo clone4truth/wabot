@@ -9,7 +9,7 @@ WAHA Sticker Bot adalah bot WhatsApp berbasis modular monolith untuk pembuatan d
 - **Runtime**: Node.js 22 + TypeScript
 - **Web Framework**: Fastify 5.x
 - **Image Processing**: Sharp 0.33.x
-- **Video Processing**: FFmpeg + fluent-ffmpeg
+- **Video Processing**: FFmpeg (standardized child process runner dengan deadline timeout, termination confirmation, dan ffprobe metadata validation)
 - **Text Rendering**: SVG text rendering via Sharp (presisi px; Pango tidak dipakai karena unit font tak terprediksi)
 - **WhatsApp Gateway**: WAHA (self-hosted REST API)
 - **HTTP Client**: node-fetch
@@ -18,47 +18,54 @@ WAHA Sticker Bot adalah bot WhatsApp berbasis modular monolith untuk pembuatan d
 
 ```
 WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
-→ AccessGuard → RateLimiter (user + group) → IdempotencyGuard (PROCESSING/DONE)
-→ CommandParser → CommandRouter
+→ AccessGuard → CommandParser → IdempotencyGuard.tryStart (atomic)
+→ RateLimiter (user + group) → CommandRouter
 → InputResolver → StickerProcessor → Result (+EXIF pack) → WAHAClient → WhatsApp
 ```
 
 ## Component Responsibilities
 
 ### Layer 1: HTTP & Gateway
-- **WebhookController**: Menerima request WAHA, meneruskan ke verifier
+- **WebhookController**: Menerima request WAHA, memverifikasi signature, routing command, dan mengelola state idempotency/rate limit
 - **HealthController**: Health check endpoint
 
 ### Layer 2: WhatsApp Integration
-- **WAHAClient**: Adapter outbound ke WAHA API (sendSticker, sendImage, sendText)
+- **WAHAClient**: Adapter outbound ke WAHA API:
+  - `sendSticker`: `POST /api/sendSticker`
+  - `sendImage`: `POST /api/sendImage`
+  - `sendVideo`: `POST /api/sendVideo` (`convert: false`)
+  - `sendText`: `POST /api/sendText`
+  - `sendReaction`: `PUT /api/reaction` (body: `session`, `messageId`, `reaction`)
 - **WebhookVerifier**: HMAC signature verification, body size validation
 - **MessageNormalizer**: Mengubah payload WAHA menjadi NormalizedMessage
 
 ### Layer 3: Security
 - **MemoryRateLimiter**: In-memory rate limiting per user (8/mnt) + per group (30/mnt)
-- **IdempotencyGuard**: In-memory TTL cache dengan state PROCESSING/DONE
-- **SSRF Protection**: Host allowlist + validasi redirect pada MediaDownloader
+- **IdempotencyGuard**: In-memory TTL cache dengan atomic `tryStart(key)` (state PROCESSING/DONE)
+- **SSRF Protection**: Exact WAHA origin allowlist + validasi redirect pada MediaDownloader
 
 ### Layer 4: Core Business Logic
-- **StickerService**: Facade untuk semua sticker processors
+- **StickerService**: Facade untuk semua sticker processors; concurrency slot release terikat pada terminasi proses sebenarnya
 - **InputResolver**: Menentukan sumber input berdasarkan priority (reply → media → text)
 - **CommandParser**: Parsing command prefix dan argument
 - **CommandRouter**: Mapping command ke handler
 
 ### Layer 5: Processors
-- **TextStickerProcessor**: Sticker teks dengan Pango rendering
-- **ImageStickerProcessor**: Image → WebP (full/crop/circle/meme)
-- **VideoStickerProcessor**: Video → Animated WebP
+- **TextStickerProcessor**: Plain sticker teks dengan SVG + Sharp rendering
+- **ImageStickerProcessor**: Image → WebP (full/crop/circle)
+- **VideoStickerProcessor**: Video → Animated WebP (H.264/WebP, single deadline ownership)
 - **MemeProcessor**: Image dengan teks atas/bawah
 - **QuoteProcessor**: Desain quote card
 - **BubbleProcessor**: Chat bubble style
 - **ToImageProcessor**: Static sticker → PNG
-- **ToGifProcessor**: Animated sticker → MP4
+- **ToGifProcessor**: Animated sticker → MP4 (H.264/libx264, yuv420p, +faststart, ffprobe codec validation)
+- **TtpProcessor**: Text-to-Picture sticker dengan gradien
+- **AttpProcessor**: Animated Text-to-Picture sticker dengan frame pelangi
 
 ### Layer 6: Media
 - **MediaDownloader**: Download media dari exact WAHA origin (redirect tervalidasi), size cap streaming
 - **Validator**: MIME signature, file size, content validation
-- **FFmpeg**: Video metadata, conversion to animated WebP
+- **FFmpeg**: Video metadata, standardized runner dengan timeout dan graceful SIGKILL
 - **TempFiles**: Create, cleanup, orphan cleanup
 
 ### Layer 7: Rendering

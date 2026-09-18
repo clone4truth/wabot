@@ -2,7 +2,6 @@ import Sharp from 'sharp';
 import { StickerResult } from '../result';
 import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
-import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 

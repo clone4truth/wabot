@@ -88,6 +88,11 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       return reply.code(200).send({ status: 'ok' });
     }
 
+    const parsed = parseCommand(message.body, prefix);
+    if (!parsed) {
+      return reply.code(200).send({ status: 'ok' });
+    }
+
     const access = await accessGuard.check(message);
     if (!access.allowed) {
       if (access.reason === 'admin') {
@@ -99,38 +104,32 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     }
 
     const idempotencyKey = `${message.eventId}`;
-    if (idempotency.isDuplicate(idempotencyKey)) {
+    if (!idempotency.tryStart(idempotencyKey)) {
       logger.info('Duplicate webhook detected', { messageIdHash: hashIdentifier(message.eventId) });
       return reply.code(200).send({ status: 'ok', duplicate: true });
     }
 
-    // Rate limit SETELAH duplicate check agar retry tidak memakan kuota.
+    // Rate limit SETELAH idempotency atomic claim agar duplikat konkuren tidak memakan kuota.
     // PRD: private -> user limit; group -> user limit DAN group limit.
     const userResult = await rateLimiter.consume(`user:${message.senderId}`);
     const groupResult = message.isGroup
       ? await rateLimiter.consume(`group:${message.chatId}`)
       : { allowed: true, remaining: 0, resetAt: 0 };
     if (!userResult.allowed || !groupResult.allowed) {
-      // Sudah ditangani (balas peringatan) -> 200 agar WAHA tidak me-retry.
+      // Sudah ditangani (balas peringatan) -> tandai done agar tidak menggantung di PROCESSING
+      idempotency.markDone(idempotencyKey);
       await wahaClient.sendText(message.chatId, '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.');
       return reply.code(200).send({ status: 'rate_limited' });
     }
 
-    const parsed = parseCommand(message.body, prefix);
-    if (!parsed) {
-      return reply.code(200).send({ status: 'ok' });
-    }
-
-    idempotency.markProcessing(idempotencyKey);
-
     try {
       await dispatchCommand(parsed, message);
+      idempotency.markDone(idempotencyKey);
     } catch (err) {
       // Gagal -> state dihapus agar retry WAHA boleh memproses lagi.
       idempotency.markFailed(idempotencyKey);
       throw err;
     }
-    idempotency.markDone(idempotencyKey);
 
     logger.info('Webhook processed', {
       requestId: request.id,
@@ -206,15 +205,22 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
   }
 }
 
+function assertNever(x: never): never {
+  throw new Error(`Unexpected object: ${JSON.stringify(x)}`);
+}
+
 async function sendProcessingResult(result: ProcessingResult, message: any, replyTo?: string): Promise<void> {
-  if (result.mimetype === 'image/webp') {
-    await wahaClient.sendSticker(message.chatId, result.buffer, replyTo);
-  } else if (result.mimetype === 'image/png') {
-    await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype, replyTo);
-  } else if (result.mimetype === 'video/mp4') {
-    await wahaClient.sendVideo(message.chatId, result.buffer, result.mimetype, replyTo);
-  } else {
-    const mime = (result as { mimetype?: string })?.mimetype;
-    throw new AppError(ErrorCode.UNSUPPORTED_STICKER_TYPE, `Unsupported result type: ${mime}`);
+  switch (result.mimetype) {
+    case 'image/webp':
+      await wahaClient.sendSticker(message.chatId, result.buffer, replyTo);
+      break;
+    case 'image/png':
+      await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype, replyTo);
+      break;
+    case 'video/mp4':
+      await wahaClient.sendVideo(message.chatId, result.buffer, result.mimetype, replyTo);
+      break;
+    default:
+      assertNever(result);
   }
 }

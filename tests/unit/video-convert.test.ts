@@ -128,6 +128,20 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     });
   }, 120000);
 
+  it('!togif timeout -> PROCESSING_TIMEOUT + workspace bersih', async () => {
+    const env = (await import('../../src/config/env')).default;
+    const fs = await import('fs');
+    const before = new Set(
+      fs.readdirSync(env.tempDir).filter((f: string) => f.startsWith('togif-') || f.endsWith('.mp4')),
+    );
+    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
+    await expect(new ToGifProcessor().process(animated.buffer, 50)).rejects.toMatchObject({
+      code: ErrorCode.PROCESSING_TIMEOUT,
+    });
+    const leaked = fs.readdirSync(env.tempDir).filter((f: string) => (f.startsWith('togif-') || f.endsWith('.mp4')) && !before.has(f));
+    expect(leaked).toEqual([]);
+  }, 120000);
+
   it('!togif konkuren: workspace UUID tidak tabrakan + bersih', async () => {
     const env = (await import('../../src/config/env')).default;
     const before = new Set(
@@ -145,11 +159,29 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     expect(leaked).toEqual([]);
   }, 120000);
 
-  it('!togif: animated -> MP4; static -> ditolak', async () => {
+  it('!togif: animated -> MP4 (h264 + yuv420p + actual dimensions); static -> ditolak', async () => {
     const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
     const mp4 = await new ToGifProcessor().process(animated.buffer);
     expect(mp4.mimetype).toBe('video/mp4');
     expect(mp4.buffer.length).toBeGreaterThan(0);
+
+    const { getVideoMetadata } = await import('../../src/media/ffmpeg');
+    const tmpOut = path.join(workdir, `check_${Date.now()}.mp4`);
+    fs.writeFileSync(tmpOut, mp4.buffer);
+    try {
+      const meta = await getVideoMetadata(tmpOut);
+      expect(meta.format.toLowerCase()).toContain('mp4');
+      expect(meta.codec).toBe('h264');
+      expect(meta.pixelFormat).toBe('yuv420p');
+      expect(meta.width).toBeGreaterThan(0);
+      expect(meta.width).toBeLessThanOrEqual(512);
+      expect(meta.height).toBeGreaterThan(0);
+      expect(meta.height).toBeLessThanOrEqual(512);
+      expect(mp4.width).toBe(meta.width);
+      expect(mp4.height).toBe(meta.height);
+    } finally {
+      if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
+    }
 
     const png = await Sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } } }).webp().toBuffer();
     await expect(new ToGifProcessor().process(png)).rejects.toMatchObject({

@@ -30,8 +30,8 @@ function assertHttpUrl(raw: string): URL {
   return parsed;
 }
 
-// Fetch manual agar setiap redirect ikut divalidasi allowlist (tidak buta
-// mengikuti redirect ke host attacker).
+// Fetch manual agar setiap redirect ikut divalidasi exact WAHA origin allowlist (tidak buta
+// mengikuti redirect ke host external/attacker).
 async function fetchValidated(url: string, remaining: number = MAX_REDIRECTS): Promise<Response> {
   assertHttpUrl(url);
   if (!isAllowedOrigin(url)) {

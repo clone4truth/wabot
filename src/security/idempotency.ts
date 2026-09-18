@@ -34,6 +34,18 @@ export class IdempotencyGuard {
     return this.get(key)?.state === 'processing';
   }
 
+  tryStart(key: string): boolean {
+    this.evictExpired();
+    const entry = this.cache.get(key);
+    const now = Date.now();
+    if (entry && now <= entry.expiresAt) {
+      return false;
+    }
+    this.evictIfFull();
+    this.cache.set(key, { state: 'processing', expiresAt: now + this.ttlMs });
+    return true;
+  }
+
   markProcessing(key: string): void {
     this.evictIfFull();
     this.cache.set(key, { state: 'processing', expiresAt: Date.now() + this.ttlMs });

@@ -31,4 +31,18 @@ process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: String(err) });
 });
 
+const shutdown = async (signal: string) => {
+  logger.info(`Received ${signal}, shutting down gracefully`);
+  try {
+    await fastify.close();
+    process.exit(0);
+  } catch (err) {
+    logger.error('Error during shutdown', { error: String(err) });
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 start();

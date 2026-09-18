@@ -9,7 +9,8 @@ import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 
 export class VideoStickerProcessor {
-  async process(videoUrl: string): Promise<StickerResult> {
+  async process(videoUrl: string, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<StickerResult> {
+    const startTime = Date.now();
     const { filePath } = await downloadMedia(videoUrl).catch((err) => {
       if (err instanceof AppError) throw err;
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download video: ${String(err)}`);
@@ -17,10 +18,13 @@ export class VideoStickerProcessor {
 
     const outputPath = createTempFile('.webp');
     try {
+      const elapsed = Date.now() - startTime;
+      const remainingProbe = Math.max(1000, timeoutMs - elapsed);
       let metadata;
       try {
-        metadata = await getVideoMetadata(filePath);
+        metadata = await getVideoMetadata(filePath, Math.min(5000, remainingProbe));
       } catch (err) {
+        if (err instanceof AppError) throw err;
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, `Video tidak dapat dibaca: ${String(err)}`);
       }
 
@@ -32,7 +36,20 @@ export class VideoStickerProcessor {
         throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Video terlalu besar');
       }
 
-      await convertVideoToAnimatedWebp(filePath, outputPath);
+      const elapsedBeforeFfmpeg = Date.now() - startTime;
+      const remainingFfmpeg = timeoutMs - elapsedBeforeFfmpeg;
+      if (remainingFfmpeg <= 0) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+
+      await convertVideoToAnimatedWebp(
+        filePath,
+        outputPath,
+        512,
+        env.maxVideoDurationSeconds,
+        15,
+        remainingFfmpeg,
+      );
       return await this.validateOutput(outputPath);
     } finally {
       cleanupTempFile(filePath);

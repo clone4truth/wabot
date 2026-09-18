@@ -320,16 +320,53 @@ describe('Webhook end-to-end', () => {
     expect(JSON.parse((await postWebhook(mk(uid('q')))).body).status).toBe('rate_limited');
   });
 
-  it('duplikat konkuren dieksekusi sekali', async () => {
+  it('duplikat konkuren dieksekusi sekali dan hanya consume 1 kuota', async () => {
+    const from = uid('conc-user') + '@c.us';
+    const eventId = uid('conc');
     const raw = JSON.stringify({
       event: 'message', session: 'bot',
-      payload: { id: uid('conc'), timestamp: Date.now(), from: uid('user') + '@c.us', to: 'bot@c.us', body: '!ping', hasMedia: false },
+      payload: { id: eventId, timestamp: Date.now(), from, to: 'bot@c.us', body: '!ping', hasMedia: false },
     });
     vi.clearAllMocks();
-    const [a, b] = await Promise.all([postWebhook(raw), postWebhook(raw)]);
+    // Buka race window: wahaMocks.sendText asynchronous delay
+    wahaMocks.sendText.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const [a, b, c] = await Promise.all([
+      postWebhook(raw),
+      postWebhook(raw),
+      postWebhook(raw),
+    ]);
+
     expect(a.statusCode).toBe(200);
     expect(b.statusCode).toBe(200);
+    expect(c.statusCode).toBe(200);
+
+    const bodies = [JSON.parse(a.body), JSON.parse(b.body), JSON.parse(c.body)];
+    const duplicates = bodies.filter((item) => item.duplicate === true);
+    const nonDuplicates = bodies.filter((item) => !item.duplicate);
+    expect(nonDuplicates.length).toBe(1);
+    expect(duplicates.length).toBe(2);
     expect(wahaMocks.sendText).toHaveBeenCalledTimes(1);
+
+    // Verifikasi kuota: user limit adalah 8. Jika hanya 1 event dikonsumsi, 7 pesan unik berikutnya sukses
+    wahaMocks.sendText.mockResolvedValue(undefined);
+    for (let i = 0; i < 7; i++) {
+      const uniqueMsg = JSON.stringify({
+        event: 'message', session: 'bot',
+        payload: { id: uid('quota-check'), timestamp: Date.now(), from, to: 'bot@c.us', body: '!ping', hasMedia: false },
+      });
+      const res = await postWebhook(uniqueMsg);
+      expect(JSON.parse(res.body).status || 'ok').toBe('ok');
+    }
+    // Permintaan ke-9 (1 dari conc + 7 unik = 8 limit) -> ke-9 rate_limited!
+    const overLimitMsg = JSON.stringify({
+      event: 'message', session: 'bot',
+      payload: { id: uid('over-limit'), timestamp: Date.now(), from, to: 'bot@c.us', body: '!ping', hasMedia: false },
+    });
+    const overRes = await postWebhook(overLimitMsg);
+    expect(JSON.parse(overRes.body).status).toBe('rate_limited');
   });
 
   it('sender terblokir -> diam (200 tanpa aksi)', async () => {

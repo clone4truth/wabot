@@ -9,7 +9,7 @@ import { ErrorCode } from '../../src/errors/error-codes';
 describe('WAHAClient (format API resmi)', () => {
   let server: http.Server;
   let baseUrl: string;
-  const seen: { url?: string; body: any }[] = [];
+  const seen: { method?: string; url?: string; body: any }[] = [];
   let failNext = 0;
 
   beforeAll(async () => {
@@ -17,7 +17,7 @@ describe('WAHAClient (format API resmi)', () => {
       let data = '';
       req.on('data', (c) => (data += c));
       req.on('end', () => {
-        seen.push({ url: req.url, body: data ? JSON.parse(data) : null });
+        seen.push({ method: req.method, url: req.url, body: data ? JSON.parse(data) : null });
         if (failNext > 0) {
           failNext--;
           res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -51,6 +51,7 @@ describe('WAHAClient (format API resmi)', () => {
   it('sendText: path + session + chatId + text (+reply_to)', async () => {
     await client().sendText('1@c.us', 'hi', 'msg_1');
     const last = seen[seen.length - 1];
+    expect(last.method).toBe('POST');
     expect(last.url).toBe('/api/sendText');
     expect(last.body).toMatchObject({ session: 'bot', chatId: '1@c.us', text: 'hi', reply_to: 'msg_1' });
   });
@@ -58,6 +59,7 @@ describe('WAHAClient (format API resmi)', () => {
   it('sendImage: file base64 + filename', async () => {
     await client().sendImage('1@c.us', Buffer.from('img'), 'image/png');
     const last = seen[seen.length - 1];
+    expect(last.method).toBe('POST');
     expect(last.url).toBe('/api/sendImage');
     expect(last.body.file).toMatchObject({ mimetype: 'image/png', filename: 'image.png' });
     expect(typeof last.body.file.data).toBe('string');
@@ -66,19 +68,48 @@ describe('WAHAClient (format API resmi)', () => {
   it('sendSticker: webp base64', async () => {
     await client().sendSticker('1@c.us', Buffer.from('stk'));
     const last = seen[seen.length - 1];
+    expect(last.method).toBe('POST');
     expect(last.url).toBe('/api/sendSticker');
     expect(last.body.file).toMatchObject({ mimetype: 'image/webp', filename: 'sticker.webp' });
   });
 
-  it('sendVideo: path + session + base64 + reply_to', async () => {
+  it('sendVideo: path + session + base64 + convert:false + reply_to', async () => {
     await client().sendVideo('1@c.us', Buffer.from('vid'), 'video/mp4', 'msg_9');
     const last = seen[seen.length - 1];
+    expect(last.method).toBe('POST');
     expect(last.url).toBe('/api/sendVideo');
     expect(last.body).toMatchObject({
-      session: 'bot', chatId: '1@c.us', reply_to: 'msg_9',
+      session: 'bot', chatId: '1@c.us', reply_to: 'msg_9', convert: false,
     });
+    expect(last.body.convert).toBe(false);
     expect(last.body.file).toMatchObject({ mimetype: 'video/mp4', filename: 'video.mp4' });
     expect(typeof last.body.file.data).toBe('string');
+  });
+
+  it('sendReaction: PUT /api/reaction dengan session, messageId, reaction (tanpa chatId)', async () => {
+    await client().sendReaction('1@c.us', 'false_xxx_123', '👍');
+    const last = seen[seen.length - 1];
+    expect(last.method).toBe('PUT');
+    expect(last.url).toBe('/api/reaction');
+    expect(last.body).toEqual({
+      session: 'bot',
+      messageId: 'false_xxx_123',
+      reaction: '👍',
+    });
+    // Pastikan endpoint lama tidak pernah dipanggil
+    expect(seen.some((req) => req.url === '/api/sendReaction')).toBe(false);
+  });
+
+  it('sendReaction: hapus reaction dengan string kosong', async () => {
+    await client().sendReaction('1@c.us', 'false_xxx_123', '');
+    const last = seen[seen.length - 1];
+    expect(last.method).toBe('PUT');
+    expect(last.url).toBe('/api/reaction');
+    expect(last.body).toEqual({
+      session: 'bot',
+      messageId: 'false_xxx_123',
+      reaction: '',
+    });
   });
 
   it('gagal kirim -> AppError WAHA_SEND_FAILED', async () => {
@@ -92,7 +123,7 @@ describe('WAHAClient (format API resmi)', () => {
     }
   });
 
-  it('sendReaction gagal tetap diam', async () => {
+  it('sendReaction gagal tetap diam (best-effort)', async () => {
     failNext = 1;
     await expect(client().sendReaction('1@c.us', 'm1', '👍')).resolves.toBeUndefined();
   });

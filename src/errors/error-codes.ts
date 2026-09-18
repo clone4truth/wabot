@@ -20,9 +20,9 @@ export enum ErrorCode {
 export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.INVALID_COMMAND]: '❌ Perintah tidak dikenal. Gunakan !menu untuk daftar command.',
   [ErrorCode.UNSUPPORTED_INPUT]: '❌ Reply teks, foto, video, atau sticker yang didukung.',
-  [ErrorCode.TEXT_TOO_LONG]: `❌ Teks maksimal ${300} karakter.`,
+  [ErrorCode.TEXT_TOO_LONG]: '❌ Teks terlalu panjang.',
   [ErrorCode.MEDIA_TOO_LARGE]: '❌ Ukuran media terlalu besar.',
-  [ErrorCode.VIDEO_TOO_LONG]: '❌ Video maksimal 10 detik.',
+  [ErrorCode.VIDEO_TOO_LONG]: '❌ Video terlalu panjang.',
   [ErrorCode.MEDIA_DOWNLOAD_FAILED]: '❌ Gagal mengunduh media dari WAHA.',
   [ErrorCode.MEDIA_DECODE_FAILED]: '❌ Format media tidak didukung atau rusak.',
   [ErrorCode.PROCESSING_TIMEOUT]: '⏳ Proses stiker melebihi batas waktu. Coba lagi.',

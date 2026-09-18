@@ -85,8 +85,8 @@ git push -u origin main
 ## Requirements
 
 - Node.js >= 20
-- FFmpeg
-- fontconfig + ttf-dejavu
+- FFmpeg (dengan encoder libx264 dan libwebp)
+- fontconfig + ttf-dejavu + font-noto + font-noto-emoji
 - WAHA server
 
 ## Deployment

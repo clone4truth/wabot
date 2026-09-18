@@ -24,25 +24,43 @@ export class WAHAClient {
     };
   }
 
-  private async post(path: string, body: Record<string, unknown>, action: string, chatId: string): Promise<any> {
+  private async request(
+    method: 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body: Record<string, unknown>,
+    action: string,
+    logChatId?: string,
+  ): Promise<any> {
     let response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
+        method,
         headers: this.headers(),
-        body: JSON.stringify({ session: this.session, chatId, ...body }),
+        body: JSON.stringify(body),
       });
     } catch (err) {
-      logger.error(`WAHA ${action} request failed`, { chatIdHash: hashIdentifier(chatId), error: String(err) });
+      logger.error(`WAHA ${action} request failed`, {
+        chatIdHash: logChatId ? hashIdentifier(logChatId) : undefined,
+        error: String(err),
+      });
       throw new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
     }
 
     if (!response.ok) {
-      logger.error(`WAHA ${action} failed with status ${response.status}`, { chatIdHash: hashIdentifier(chatId), status: response.status });
-      throw new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
+      logger.error(`WAHA ${action} failed with status ${response.status}`, {
+        chatIdHash: logChatId ? hashIdentifier(logChatId) : undefined,
+        status: response.status,
+      });
+      const appErr = new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
+      (appErr as any).status = response.status;
+      throw appErr;
     }
 
     return response.json().catch(() => ({}));
+  }
+
+  private async post(path: string, body: Record<string, unknown>, action: string, chatId: string): Promise<any> {
+    return this.request('POST', path, { session: this.session, chatId, ...body }, action, chatId);
   }
 
   async sendSticker(chatId: string, stickerBuffer: Buffer, replyTo?: string): Promise<void> {
@@ -90,6 +108,7 @@ export class WAHAClient {
         filename: 'video.mp4',
         data: videoBuffer.toString('base64'),
       },
+      convert: false,
       ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendVideo', chatId);
     logger.info('Video sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
@@ -114,9 +133,24 @@ export class WAHAClient {
 
   async sendReaction(chatId: string, messageId: string, emoji: string): Promise<void> {
     try {
-      await this.post('/api/sendReaction', { messageId, reaction: emoji }, 'sendReaction', chatId);
-    } catch {
-      // Reaction is optional, ignore failures
+      await this.request(
+        'PUT',
+        '/api/reaction',
+        {
+          session: this.session,
+          messageId,
+          reaction: emoji,
+        },
+        'sendReaction',
+        chatId,
+      );
+    } catch (err: any) {
+      logger.warn('WAHA sendReaction failed', {
+        action: 'sendReaction',
+        chatIdHash: hashIdentifier(chatId),
+        messageIdHash: hashIdentifier(messageId),
+        status: err?.status || err?.code || 'error',
+      });
     }
   }
 

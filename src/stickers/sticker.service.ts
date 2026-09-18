@@ -69,12 +69,24 @@ export class StickerService {
       throw new AppError(ErrorCode.VIDEO_BUSY, 'Video masih diproses');
     }
     try {
-      const raw = await Promise.race([
-        this.runProcessor(input),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs)
-        ),
-      ]);
+      const isHeavy = input.type === 'video' || input.type === 'togif' || input.type === 'attp';
+      let raw: ProcessingResult | null;
+      if (isHeavy) {
+        raw = await this.runProcessor(input, timeoutMs);
+      } else {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          raw = await Promise.race([
+            this.runProcessor(input, timeoutMs),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs);
+              if (typeof (timer as any).unref === 'function') (timer as any).unref();
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
       return this.withPackMeta(raw, input.type);
     } finally {
       if (needsSlot) this.videoSlots.release(slotKey);
@@ -101,7 +113,7 @@ export class StickerService {
   }
 
   // Ekstrak argumen primitif dari ResolvedInput sesuai signature tiap prosesor.
-  private async runProcessor(input: ResolvedInput): Promise<ProcessingResult | null> {
+  private async runProcessor(input: ResolvedInput, timeoutMs: number = env.textProcessingTimeoutMs): Promise<ProcessingResult | null> {
     const content = input.content;
 
     switch (input.type) {
@@ -132,13 +144,13 @@ export class StickerService {
         return this.processors.ttp.process(content.text ?? '');
       }
       case 'attp': {
-        return this.processors.attp.process(content.text ?? '');
+        return this.processors.attp.process(content.text ?? '', timeoutMs);
       }
       case 'video': {
         if (!content.mediaUrl) {
           throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
         }
-        return this.processors.video.process(content.mediaUrl);
+        return this.processors.video.process(content.mediaUrl, timeoutMs);
       }
       case 'toimg':
       case 'togif': {
@@ -154,7 +166,7 @@ export class StickerService {
             const isAnimated = (meta.pages ?? 1) > 1;
             return this.processors.toimg.process(stickerBuffer, isAnimated);
           }
-          return this.processors.togif.process(stickerBuffer);
+          return await this.processors.togif.process(stickerBuffer, timeoutMs);
         } finally {
           cleanupTempFile(filePath);
         }
