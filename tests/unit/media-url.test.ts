@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resolveMediaUrl } from '../../src/media/downloader';
+import http from 'http';
+import { AddressInfo } from 'net';
+import Sharp from 'sharp';
+import { resolveMediaUrl, downloadMedia } from '../../src/media/downloader';
 import { isAllowedOrigin } from '../../src/media/validator';
 import env from '../../src/config/env';
 
@@ -47,5 +50,52 @@ describe('Media URL (WAHA localhost rewrite + SSRF allowlist)', () => {
     env.wahaBaseUrl = 'http://localhost:3001';
     expect(isAllowedOrigin('http://localhost:3001/api/files/a.jpg')).toBe(true);
     env.wahaBaseUrl = 'https://waha.example.com';
+  });
+});
+
+describe('downloadMedia mengirim X-Api-Key (file WAHA butuh auth)', () => {
+  let server: http.Server;
+  let baseUrl: string;
+  let savedBase: string;
+  let savedKey: string;
+
+  beforeAll(async () => {
+    savedBase = env.wahaBaseUrl;
+    savedKey = env.wahaApiKey;
+    const img = await Sharp({
+      create: { width: 50, height: 50, channels: 3, background: { r: 10, g: 200, b: 100 } },
+    }).jpeg().toBuffer();
+    server = http.createServer((req, res) => {
+      if (req.url === '/api/files/a.jpg' && req.headers['x-api-key'] === 'test-key') {
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        res.end(img);
+      } else {
+        res.writeHead(401);
+        res.end('{}');
+      }
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const port = (server.address() as AddressInfo).port;
+    baseUrl = `http://localhost:${port}`;
+    env.wahaBaseUrl = baseUrl;
+    env.wahaApiKey = 'test-key';
+  });
+
+  afterAll(async () => {
+    env.wahaBaseUrl = savedBase;
+    env.wahaApiKey = savedKey;
+    await new Promise((r) => server.close(r));
+  });
+
+  it('berhasil dengan API key yang benar', async () => {
+    const result = await downloadMedia(`${baseUrl}/api/files/a.jpg`);
+    expect(result.size).toBeGreaterThan(0);
+    expect(result.mimeType).toBe('image/jpeg');
+  });
+
+  it('gagal 401 dengan API key salah', async () => {
+    env.wahaApiKey = 'salah';
+    await expect(downloadMedia(`${baseUrl}/api/files/a.jpg`)).rejects.toThrow('401');
+    env.wahaApiKey = 'test-key';
   });
 });

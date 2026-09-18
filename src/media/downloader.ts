@@ -22,7 +22,11 @@ export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
   const timeout = setTimeout(() => controller.abort(), 15_000);
   let response;
   try {
-    response = await fetch(resolvedUrl, { signal: controller.signal });
+    // File media di-host WAHA (/api/files/...) dan butuh API key.
+    response = await fetch(resolvedUrl, {
+      signal: controller.signal,
+      headers: { 'X-Api-Key': env.wahaApiKey },
+    });
   } catch (err) {
     throw new Error(`Failed to download media: ${String(err)}`);
   } finally {
