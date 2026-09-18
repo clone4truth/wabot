@@ -1,7 +1,9 @@
 import { defaultJobManager } from '../stickers/jobs/job-manager';
+import { hashIdentifier } from '../observability/privacy';
 
 export function handleJobCommand(senderId: string): string {
-  const active = defaultJobManager.getActiveJobs(senderId);
+  const ownerHash = hashIdentifier(senderId);
+  const active = defaultJobManager.getActiveJobs(ownerHash);
 
   if (active.length === 0) {
     return 'ℹ️ Tidak ada proses stiker aktif untuk nomor kamu.';

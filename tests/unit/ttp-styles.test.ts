@@ -43,11 +43,19 @@ describe('TTP Style Presets & TtpGenerator', () => {
     expect(result.height).toBe(512);
   });
 
-  it('falls back to default style if unknown style is provided', async () => {
-    const fallback = getTtpStyle('unknown-style');
-    expect(fallback.name).toBe('default');
-    const result = await processor.process('Default Test', 'unknown-style');
-    expect(result.width).toBe(512);
+  it('throws INVALID_ARGUMENT if unknown explicit style is provided', async () => {
+    expect(() => getTtpStyle('unknown-style')).toThrow();
+    const context = { chatId: '123@c.us', senderId: '456@c.us' };
+    expect(() =>
+      generator.validate(
+        {
+          type: 'ttp',
+          text: 'Default Test',
+          options: { style: 'unknown-style' },
+        },
+        context
+      )
+    ).toThrow();
   });
 
   it('TtpGenerator supports ttp type', () => {

@@ -3,7 +3,7 @@ import { StickerGenerator, GeneratorInput, GeneratorContext } from './types';
 import { ProcessingResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { countGraphemes, sanitizeText, escapeXml } from '../rendering/text-utils';
+import { splitGraphemes, sanitizeText, escapeXml, isEmojiGrapheme } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
 
 export class EmojiGenerator implements StickerGenerator {
@@ -16,19 +16,29 @@ export class EmojiGenerator implements StickerGenerator {
   validate(input: GeneratorInput, _context: GeneratorContext): void {
     const raw = (input.text ?? input.content?.text ?? '') as string;
     const clean = sanitizeText(raw);
-    const count = countGraphemes(clean);
+    const graphemes = splitGraphemes(clean);
+    const count = graphemes.length;
     if (count < 1 || count > 4) {
-      throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Command !emoji hanya menerima 1-4 emoji');
+      throw new AppError(ErrorCode.INVALID_ARGUMENT, '❌ Command !emoji hanya menerima 1-4 emoji');
+    }
+    const allEmoji = graphemes.every((g) => isEmojiGrapheme(g));
+    if (!allEmoji) {
+      throw new AppError(ErrorCode.INVALID_ARGUMENT, '❌ Command !emoji hanya menerima karakter emoji yang valid');
     }
   }
 
   async process(input: GeneratorInput, _context: GeneratorContext): Promise<ProcessingResult> {
     const raw = (input.text ?? input.content?.text ?? '') as string;
     const clean = sanitizeText(raw);
-    const count = countGraphemes(clean);
+    const graphemes = splitGraphemes(clean);
+    const count = graphemes.length;
 
     if (count < 1 || count > 4) {
-      throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Command !emoji hanya menerima 1-4 emoji');
+      throw new AppError(ErrorCode.INVALID_ARGUMENT, '❌ Command !emoji hanya menerima 1-4 emoji');
+    }
+    const allEmoji = graphemes.every((g) => isEmojiGrapheme(g));
+    if (!allEmoji) {
+      throw new AppError(ErrorCode.INVALID_ARGUMENT, '❌ Command !emoji hanya menerima karakter emoji yang valid');
     }
 
     let fontSize = 240;

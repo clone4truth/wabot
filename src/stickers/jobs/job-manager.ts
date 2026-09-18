@@ -17,17 +17,30 @@ export interface JobMetadata {
   errorCode?: string;
 }
 
+export interface JobLimits {
+  concurrency: number;
+  maxQueue: number;
+}
+
+export interface ExecuteOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 interface QueuedTask<T> {
   jobId: string;
   ownerHash: string;
   type: JobType;
-  task: () => Promise<T>;
+  task: (context?: { remainingTimeoutMs?: number; signal?: AbortSignal }) => Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
   reject: (reason?: any) => void;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  queueTimer?: NodeJS.Timeout;
 }
 
 export class JobManager {
-  private limits: Record<JobType, number>;
+  private limits: Record<JobType, JobLimits>;
   private activeCount: Record<JobType, number> = {
     image: 0,
     video: 0,
@@ -42,16 +55,45 @@ export class JobManager {
   };
   private jobs = new Map<string, JobMetadata>();
 
-  constructor(customLimits?: Partial<Record<JobType, number>>) {
+  constructor(
+    customConcurrency?: Partial<Record<JobType, number>>,
+    customMaxQueue?: Partial<Record<JobType, number>>,
+  ) {
     this.limits = {
-      image: customLimits?.image ?? env.maxImageJobs,
-      video: customLimits?.video ?? env.maxVideoJobs,
-      animation: customLimits?.animation ?? env.maxAnimationJobs,
-      background: customLimits?.background ?? env.maxBackgroundJobs,
+      image: {
+        concurrency: customConcurrency?.image ?? env.maxImageJobs,
+        maxQueue: customMaxQueue?.image ?? env.maxImageQueue,
+      },
+      video: {
+        concurrency: customConcurrency?.video ?? env.maxVideoJobs,
+        maxQueue: customMaxQueue?.video ?? env.maxVideoQueue,
+      },
+      animation: {
+        concurrency: customConcurrency?.animation ?? env.maxAnimationJobs,
+        maxQueue: customMaxQueue?.animation ?? env.maxAnimationQueue,
+      },
+      background: {
+        concurrency: customConcurrency?.background ?? env.maxBackgroundJobs,
+        maxQueue: customMaxQueue?.background ?? env.maxBackgroundQueue,
+      },
     };
   }
 
-  async execute<T>(type: JobType, ownerHash: string, task: () => Promise<T>): Promise<T> {
+  async execute<T>(
+    type: JobType,
+    ownerHash: string,
+    task: (context?: { remainingTimeoutMs?: number; signal?: AbortSignal }) => Promise<T>,
+    options?: ExecuteOptions,
+  ): Promise<T> {
+    const limits = this.limits[type];
+    if (this.queues[type].length >= limits.maxQueue) {
+      throw new AppError(ErrorCode.JOB_QUEUE_FULL, '⏳ Antrean sedang penuh. Coba lagi sebentar.');
+    }
+
+    if (options?.signal?.aborted) {
+      throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan');
+    }
+
     const jobId = randomUUID();
     const meta: JobMetadata = {
       jobId,
@@ -63,14 +105,39 @@ export class JobManager {
     this.jobs.set(jobId, meta);
 
     return new Promise<T>((resolve, reject) => {
+      let queueTimer: NodeJS.Timeout | undefined;
+      if (options?.timeoutMs && options.timeoutMs > 0) {
+        queueTimer = setTimeout(() => {
+          this.cancelQueuedJob(jobId, new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Queue wait timeout'));
+        }, options.timeoutMs);
+        if (typeof (queueTimer as any).unref === 'function') (queueTimer as any).unref();
+      }
+
+      const abortHandler = () => {
+        this.cancelQueuedJob(jobId, new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan'));
+      };
+      if (options?.signal) {
+        options.signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
       this.queues[type].push({
         jobId,
         ownerHash,
         type,
         task,
-        resolve,
-        reject,
+        resolve: (val) => {
+          if (options?.signal) options.signal.removeEventListener('abort', abortHandler);
+          resolve(val);
+        },
+        reject: (err) => {
+          if (options?.signal) options.signal.removeEventListener('abort', abortHandler);
+          reject(err);
+        },
+        timeoutMs: options?.timeoutMs,
+        signal: options?.signal,
+        queueTimer,
       });
+
       this.pump(type);
     });
   }
@@ -92,6 +159,10 @@ export class JobManager {
   }
 
   cancelJob(jobId: string): boolean {
+    return this.cancelQueuedJob(jobId);
+  }
+
+  private cancelQueuedJob(jobId: string, reason?: Error): boolean {
     const job = this.jobs.get(jobId);
     if (!job) return false;
 
@@ -100,9 +171,10 @@ export class JobManager {
       const idx = q.findIndex((t) => t.jobId === jobId);
       if (idx !== -1) {
         const [task] = q.splice(idx, 1);
+        if (task.queueTimer) clearTimeout(task.queueTimer);
         job.status = 'CANCELLED';
         job.finishedAt = new Date();
-        task.reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan'));
+        task.reject(reason ?? new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan'));
         return true;
       }
     }
@@ -111,35 +183,46 @@ export class JobManager {
 
   private pump(type: JobType): void {
     const limit = this.limits[type];
-    while (this.activeCount[type] < limit && this.queues[type].length > 0) {
+    while (this.activeCount[type] < limit.concurrency && this.queues[type].length > 0) {
       const next = this.queues[type].shift();
       if (!next) break;
 
+      if (next.queueTimer) {
+        clearTimeout(next.queueTimer);
+        next.queueTimer = undefined;
+      }
+
       const job = this.jobs.get(next.jobId);
-      if (job && job.status === 'CANCELLED') {
+      if (!job || job.status === 'CANCELLED') {
         continue;
       }
 
-      this.activeCount[type]++;
-      if (job) {
-        job.status = 'PROCESSING';
-        job.startedAt = new Date();
+      const elapsed = Date.now() - job.createdAt.getTime();
+      let remainingTimeoutMs: number | undefined;
+      if (next.timeoutMs && next.timeoutMs > 0) {
+        remainingTimeoutMs = next.timeoutMs - elapsed;
+        if (remainingTimeoutMs <= 0) {
+          job.status = 'CANCELLED';
+          job.finishedAt = new Date();
+          next.reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Queue wait timeout'));
+          continue;
+        }
       }
 
-      next.task()
+      this.activeCount[type]++;
+      job.status = 'PROCESSING';
+      job.startedAt = new Date();
+
+      next.task({ remainingTimeoutMs, signal: next.signal })
         .then((result) => {
-          if (job) {
-            job.status = 'DONE';
-            job.finishedAt = new Date();
-          }
+          job.status = 'DONE';
+          job.finishedAt = new Date();
           next.resolve(result);
         })
         .catch((err) => {
-          if (job) {
-            job.status = 'FAILED';
-            job.finishedAt = new Date();
-            job.errorCode = err?.code ?? err?.message ?? 'ERROR';
-          }
+          job.status = 'FAILED';
+          job.finishedAt = new Date();
+          job.errorCode = err?.code ?? err?.message ?? 'ERROR';
           next.reject(err);
         })
         .finally(() => {
@@ -151,15 +234,32 @@ export class JobManager {
   }
 
   private pruneOldJobs(): void {
-    // Keep max 200 completed jobs in memory
-    if (this.jobs.size > 200) {
-      const keys = Array.from(this.jobs.keys());
-      for (let i = 0; i < 50; i++) {
-        const k = keys[i];
-        const j = this.jobs.get(k);
-        if (j && (j.status === 'DONE' || j.status === 'FAILED' || j.status === 'CANCELLED')) {
-          this.jobs.delete(k);
+    const ttlMs = (env.jobHistoryTtlSeconds || 3600) * 1000;
+    const now = Date.now();
+
+    // 1. Delete completed jobs older than TTL
+    for (const [id, job] of this.jobs.entries()) {
+      if (job.status === 'DONE' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+        const finishedTime = (job.finishedAt ?? job.createdAt).getTime();
+        if (now - finishedTime > ttlMs) {
+          this.jobs.delete(id);
         }
+      }
+    }
+
+    // 2. Retain max 200 completed jobs (oldest-first eviction)
+    const completed: Array<{ id: string; time: number }> = [];
+    for (const [id, job] of this.jobs.entries()) {
+      if (job.status === 'DONE' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+        completed.push({ id, time: (job.finishedAt ?? job.createdAt).getTime() });
+      }
+    }
+
+    if (completed.length > 200) {
+      completed.sort((a, b) => a.time - b.time);
+      const toDelete = completed.length - 200;
+      for (let i = 0; i < toDelete; i++) {
+        this.jobs.delete(completed[i].id);
       }
     }
   }

@@ -4,6 +4,7 @@ import fs from 'fs';
 import { BackgroundRemovalService } from '../../src/stickers/background-removal/service';
 import { DisabledBackgroundRemovalProvider } from '../../src/stickers/background-removal/providers/disabled.provider';
 import { LocalBackgroundRemovalProvider } from '../../src/stickers/background-removal/providers/local.provider';
+import { ApiBackgroundRemovalProvider } from '../../src/stickers/background-removal/providers/api.provider';
 import { RemoveBgGenerator } from '../../src/stickers/generators/removebg.generator';
 import { ErrorCode } from '../../src/errors/error-codes';
 
@@ -52,30 +53,24 @@ describe('BackgroundRemovalProvider & Service', () => {
     expect(data[centerIdx + 3]).toBeGreaterThan(200);
   });
 
-  it('BackgroundRemovalService throttles concurrency', async () => {
-    let running = 0;
-    let maxRunning = 0;
-
-    const slowMockProvider = {
+  it('BackgroundRemovalService delegates directly to provider', async () => {
+    const mockProvider = {
       name: 'mock',
-      removeBackground: async (buf: Buffer) => {
-        running++;
-        if (running > maxRunning) maxRunning = running;
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        running--;
-        return buf;
-      },
+      removeBackground: async (buf: Buffer) => Buffer.from(`processed-${buf.toString()}`),
     };
+    const service = new BackgroundRemovalService(mockProvider);
+    const result = await service.removeBackground(Buffer.from('hello'));
+    expect(result.toString()).toBe('processed-hello');
+  });
 
-    const service = new BackgroundRemovalService(slowMockProvider);
-    // Concurrency is set via env (default 1)
-    await Promise.all([
-      service.removeBackground(Buffer.from('1')),
-      service.removeBackground(Buffer.from('2')),
-      service.removeBackground(Buffer.from('3')),
-    ]);
+  it('ApiBackgroundRemovalProvider validates URL protocol', () => {
+    const provider = new ApiBackgroundRemovalProvider();
 
-    expect(maxRunning).toBe(1);
+    expect(() => provider.validateUrl('ftp://example.com/api')).toThrow();
+    expect(() => provider.validateUrl('file:///etc/passwd')).toThrow();
+    expect(() => provider.validateUrl('javascript:alert(1)')).toThrow();
+    expect(() => provider.validateUrl('http://example.com/api')).not.toThrow();
+    expect(() => provider.validateUrl('https://example.com/api')).not.toThrow();
   });
 });
 

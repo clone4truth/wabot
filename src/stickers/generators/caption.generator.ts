@@ -6,8 +6,9 @@ import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
-import { escapeXml, sanitizeText, wrapWords } from '../rendering/text-utils';
+import { escapeXml, validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
+import { fitTextIntoRegion, FittedRegionResult } from '../rendering/text-layout';
 
 export class CaptionGenerator implements StickerGenerator {
   readonly name = 'caption';
@@ -22,10 +23,16 @@ export class CaptionGenerator implements StickerGenerator {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Caption memerlukan gambar sebagai input');
     }
     const text = (input.text ?? input.content?.text ?? '') as string;
-    const clean = sanitizeText(text);
-    if (!clean) {
-      throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Teks caption tidak boleh kosong');
-    }
+    const clean = validateText(text, { emptyMessage: 'Teks caption tidak boleh kosong' });
+
+    // Validate that text fits within maximum banner capacity
+    fitTextIntoRegion({
+      text: clean,
+      width: 480,
+      height: 160,
+      maxFontSize: 28,
+      minFontSize: 14,
+    });
   }
 
   async process(input: GeneratorInput, _context: GeneratorContext): Promise<ProcessingResult> {
@@ -35,10 +42,7 @@ export class CaptionGenerator implements StickerGenerator {
     }
 
     const text = (input.text ?? input.content?.text ?? '') as string;
-    const clean = sanitizeText(text);
-    if (!clean) {
-      throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Teks caption tidak boleh kosong');
-    }
+    const clean = validateText(text, { emptyMessage: 'Teks caption tidak boleh kosong' });
 
     const position = (
       (input.options?.position as string) ??
@@ -46,6 +50,18 @@ export class CaptionGenerator implements StickerGenerator {
       (input.content?.position as string) ??
       'bottom'
     ).toLowerCase();
+
+    const maxRegionH = position === 'overlay' ? 140 : 150;
+    const fitted = fitTextIntoRegion({
+      text: clean,
+      width: 480,
+      height: maxRegionH,
+      maxFontSize: 28,
+      minFontSize: 14,
+    });
+
+    const bannerHeight = position === 'overlay' ? 140 : Math.max(100, Math.min(180, fitted.totalHeight + 32));
+    const imageHeight = 512 - bannerHeight;
 
     const { filePath } = await downloadMedia(mediaUrl);
 
@@ -55,9 +71,6 @@ export class CaptionGenerator implements StickerGenerator {
       }
 
       const family = getFontFamily(getDefaultFontPath());
-      const bannerHeight = 110;
-      const imageHeight = 512 - bannerHeight; // 402px
-
       let finalSharp: Sharp.Sharp;
 
       if (position === 'top') {
@@ -65,7 +78,7 @@ export class CaptionGenerator implements StickerGenerator {
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
-        const bannerSvg = this.renderBannerSvg(clean, family, bannerHeight, 'top');
+        const bannerSvg = this.renderBannerSvg(fitted, family, bannerHeight, 'top');
 
         finalSharp = Sharp({
           create: {
@@ -83,10 +96,10 @@ export class CaptionGenerator implements StickerGenerator {
           .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
-        const overlaySvg = this.renderBannerSvg(clean, family, 120, 'overlay');
+        const overlaySvg = this.renderBannerSvg(fitted, family, bannerHeight, 'overlay');
 
         finalSharp = Sharp(resizedImage).composite([
-          { input: Buffer.from(overlaySvg), top: 512 - 120, left: 0 },
+          { input: Buffer.from(overlaySvg), top: 512 - bannerHeight, left: 0 },
         ]);
       } else {
         // default: bottom
@@ -94,7 +107,7 @@ export class CaptionGenerator implements StickerGenerator {
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
-        const bannerSvg = this.renderBannerSvg(clean, family, bannerHeight, 'bottom');
+        const bannerSvg = this.renderBannerSvg(fitted, family, bannerHeight, 'bottom');
 
         finalSharp = Sharp({
           create: {
@@ -125,12 +138,14 @@ export class CaptionGenerator implements StickerGenerator {
     }
   }
 
-  private renderBannerSvg(text: string, family: string, height: number, mode: 'top' | 'bottom' | 'overlay'): string {
-    const fontSize = text.length > 25 ? 20 : 26;
-    const lines = wrapWords(text, Math.floor(480 / (fontSize * 0.6)));
-    const lineHeight = Math.round(fontSize * 1.3);
-    const totalTextH = lines.length * lineHeight;
-    const startY = Math.round((height - totalTextH) / 2) + Math.round(fontSize * 0.85);
+  private renderBannerSvg(
+    fitted: FittedRegionResult,
+    family: string,
+    height: number,
+    mode: 'top' | 'bottom' | 'overlay',
+  ): string {
+    const { lines, fontSize, lineHeight, totalHeight } = fitted;
+    const startY = Math.round((height - totalHeight) / 2) + Math.round(fontSize * 0.85);
 
     const textElements = lines
       .map((line, idx) => {

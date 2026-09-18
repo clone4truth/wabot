@@ -36,6 +36,24 @@ export function sliceGraphemes(text: string, start: number, end?: number): strin
 }
 
 /**
+ * Periksa apakah sebuah grapheme cluster merupakan karakter emoji valid.
+ * Mendukung:
+ * - Standar Extended_Pictographic (termasuk ZWJ sequences, skin tones)
+ * - Bendera regional (Regional_Indicator)
+ * - Keycap sequences ([0-9#*]\uFE0F?\u20E3)
+ */
+export function isEmojiGrapheme(grapheme: string): boolean {
+  if (!grapheme) return false;
+  // Keycap sequence: 1️⃣, #️⃣, *️⃣
+  if (/^[0-9#*]\uFE0F?\u20E3$/.test(grapheme)) return true;
+  // Regional indicators (flags): 🇮🇩
+  if (/^\p{Regional_Indicator}{2}$/u.test(grapheme)) return true;
+  // Extended Pictographic (base emojis, modifier sequences, skin tones, ZWJ sequences)
+  if (/\p{Extended_Pictographic}/u.test(grapheme)) return true;
+  return false;
+}
+
+/**
  * Legacy alias untuk countGraphemes agar kompatibilitas fungsi lama tetap terjaga.
  * Secara internal menggunakan grapheme cluster.
  */

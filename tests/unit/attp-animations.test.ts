@@ -74,4 +74,19 @@ describe('ATTP Animation Presets & AttpGenerator', () => {
       'Teks !attp tidak boleh kosong'
     );
   });
+
+  it('rejects unknown explicit animation effect with INVALID_ARGUMENT', () => {
+    expect(() => defaultAnimationRegistry.resolve('unknown-effect')).toThrow();
+    const context = { chatId: '123@c.us', senderId: '456@c.us' };
+    expect(() =>
+      generator.validate(
+        {
+          type: 'attp',
+          text: 'ATTP Test',
+          options: { effect: 'unknown-effect' },
+        },
+        context
+      )
+    ).toThrow();
+  });
 });

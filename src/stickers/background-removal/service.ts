@@ -8,8 +8,6 @@ import { ErrorCode } from '../../errors/error-codes';
 
 export class BackgroundRemovalService {
   private provider: BackgroundRemovalProvider;
-  private activeJobs = 0;
-  private queue: Array<() => void> = [];
 
   constructor(customProvider?: BackgroundRemovalProvider) {
     if (customProvider) {
@@ -28,15 +26,10 @@ export class BackgroundRemovalService {
   }
 
   async removeBackground(input: Buffer, options?: BackgroundRemovalOptions): Promise<Buffer> {
-    await this.acquireSlot();
-    try {
-      return await this.provider.removeBackground(input, {
-        timeoutMs: env.backgroundRemovalTimeoutMs,
-        ...options,
-      });
-    } finally {
-      this.releaseSlot();
-    }
+    return this.provider.removeBackground(input, {
+      timeoutMs: env.backgroundRemovalTimeoutMs,
+      ...options,
+    });
   }
 
   private resolveProvider(type: string): BackgroundRemovalProvider {
@@ -48,29 +41,6 @@ export class BackgroundRemovalService {
       case 'disabled':
       default:
         return new DisabledBackgroundRemovalProvider();
-    }
-  }
-
-  private acquireSlot(): Promise<void> {
-    const limit = env.backgroundRemovalConcurrency;
-    if (this.activeJobs < limit) {
-      this.activeJobs++;
-      return Promise.resolve();
-    }
-
-    return new Promise<void>((resolve) => {
-      this.queue.push(() => {
-        this.activeJobs++;
-        resolve();
-      });
-    });
-  }
-
-  private releaseSlot(): void {
-    this.activeJobs--;
-    if (this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (next) next();
     }
   }
 }

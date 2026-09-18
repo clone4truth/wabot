@@ -21,6 +21,7 @@ export enum ErrorCode {
   MODIFIER_REQUIRES_TEXT = 'MODIFIER_REQUIRES_TEXT',
   FEATURE_DISABLED = 'FEATURE_DISABLED',
   INVALID_ARGUMENT = 'INVALID_ARGUMENT',
+  JOB_QUEUE_FULL = 'JOB_QUEUE_FULL',
 }
 
 export const userMessages: Record<ErrorCode, string> = {
@@ -44,6 +45,7 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.MODIFIER_REQUIRES_TEXT]: '❌ Mode ini membutuhkan teks.',
   [ErrorCode.FEATURE_DISABLED]: '❌ Fitur remove background belum tersedia.',
   [ErrorCode.INVALID_ARGUMENT]: '❌ Argumen perintah tidak valid.',
+  [ErrorCode.JOB_QUEUE_FULL]: '⏳ Antrean sedang penuh. Coba lagi sebentar.',
 };
 
 // Pesan user dinamis: limit configurable tercermin di respons (bukan hardcode).

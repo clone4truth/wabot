@@ -27,15 +27,18 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 
 | Perintah | Input | Deskripsi | Contoh |
 | :--- | :--- | :--- | :--- |
-| `!stiker removebg` | Reply/kirim foto | Hapus background foto menjadi transparan | `!stiker removebg` |
+| `!stiker removebg` | Reply/kirim foto | Hapus background foto menjadi transparan (local: latar sederhana/seragam, api: layanan eksternal) | `!stiker removebg` |
 | `!stiker subject` | Reply/kirim foto | Smart crop otomatis fokus pada subjek utama | `!stiker subject` |
 | `!stiker outline [warna]` | Reply/kirim foto | Tambahkan outline tepi stiker | `!stiker outline white`, `!stiker outline black` |
 | `!stiker caption [posisi] <teks>` | Reply/kirim foto | Tambahkan banner caption pada foto | `!stiker caption top Halo`, `!stiker caption bottom Keren`, `!stiker caption overlay Test` |
-| `!stiker template <nama> <teks>` | Teks atau reply foto | Gunakan template SVG artistik | `!stiker template terminal npm test`, `!stiker template breaking Berita Heboh` |
+| `!stiker template <nama> <teks>` | Teks | Gunakan template SVG artistik | `!stiker template terminal npm test`, `!stiker template breaking Berita Heboh` |
 | `!template list` | Tanpa input | Tampilkan semua template yang tersedia | `!template list` |
 | `!template info <nama>` | Tanpa input | Detail spesifikasi template | `!template info breaking` |
 | `!emoji <emoji>` | 1–4 emoji | Stiker ukuran besar dari emoji | `!emoji 😂`, `!emoji 🇮🇩`, `!emoji 👨‍💻` |
 | `!badge <STATUS>` | Teks (maks 24 char) | Stiker status badge modern | `!badge ONLINE`, `!badge OFFLINE`, `!badge LIVE`, `!badge ERROR`, `!badge SUCCESS` |
+
+> [!NOTE]
+> **Batch Foundation**: `BatchStickerService` tersedia secara internal. Perintah WhatsApp batch belum diaktifkan (`!stiker batch` belum dibuka untuk publik hingga dukungan album WAHA stabil).
 
 ---
 

@@ -7,6 +7,8 @@ import {
   slideAnimation,
   bounceAnimation,
 } from './builtin.animations';
+import { AppError } from '../../errors/app-error';
+import { ErrorCode } from '../../errors/error-codes';
 
 export class AnimationRegistry {
   private presets = new Map<string, AnimationPreset>();
@@ -21,12 +23,31 @@ export class AnimationRegistry {
   }
 
   register(preset: AnimationPreset): void {
-    this.presets.set(preset.name.toLowerCase(), preset);
+    const key = preset.name?.trim().toLowerCase();
+    if (!key) {
+      throw new Error('Animation preset name cannot be empty');
+    }
+    if (this.presets.has(key)) {
+      throw new Error(`Animation preset "${key}" already registered`);
+    }
+    this.presets.set(key, preset);
+  }
+
+  resolve(name: string): AnimationPreset {
+    const key = name.trim().toLowerCase();
+    const preset = this.presets.get(key);
+    if (!preset) {
+      throw new AppError(
+        ErrorCode.INVALID_ARGUMENT,
+        `❌ Efek "${name}" tidak tersedia.\nPreset: ${this.list().join(', ')}.`,
+      );
+    }
+    return preset;
   }
 
   get(name?: string): AnimationPreset {
     if (!name) return rainbowAnimation;
-    return this.presets.get(name.toLowerCase()) ?? rainbowAnimation;
+    return this.resolve(name);
   }
 
   list(): string[] {

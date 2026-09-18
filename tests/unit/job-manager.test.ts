@@ -107,6 +107,129 @@ describe('JobManager', () => {
     resolveJobs!();
     await p1;
   });
+
+  it('rejects job when queue is full with JOB_QUEUE_FULL', async () => {
+    // 1 concurrent slot, maxQueue = 2
+    const manager = new JobManager({ image: 1 }, { image: 2 });
+
+    let unblock: () => void;
+    // 1 active
+    const p1 = manager.execute('image', 'u1', () => new Promise<void>((r) => { unblock = r; }));
+    // 2 queued
+    const p2 = manager.execute('image', 'u2', async () => 'q1');
+    const p3 = manager.execute('image', 'u3', async () => 'q2');
+
+    // 4th request -> overflow!
+    await expect(
+      manager.execute('image', 'u4', async () => 'overflow')
+    ).rejects.toMatchObject({
+      code: ErrorCode.JOB_QUEUE_FULL,
+      message: expect.stringContaining('Antrean sedang penuh'),
+    });
+
+    unblock!();
+    await Promise.all([p1, p2, p3]);
+  });
+
+  it('cancels queued job automatically when queue wait timeout expires', async () => {
+    const manager = new JobManager({ image: 1 });
+
+    let unblock: () => void;
+    const blocking = manager.execute('image', 'u1', () => new Promise<void>((r) => { unblock = r; }));
+
+    let executed = false;
+    const queued = manager.execute(
+      'image',
+      'u2',
+      async () => {
+        executed = true;
+        return 'should-not-run';
+      },
+      { timeoutMs: 30 }
+    );
+
+    await expect(queued).rejects.toMatchObject({
+      code: ErrorCode.PROCESSING_TIMEOUT,
+    });
+    expect(executed).toBe(false);
+
+    unblock!();
+    await blocking;
+  });
+
+  it('prunes completed jobs oldest-first and never prunes active jobs', () => {
+    const manager = new JobManager({ image: 5 });
+
+    // Manually add fake jobs to test pruning logic
+    const baseDate = Date.now();
+    for (let i = 0; i < 250; i++) {
+      (manager as any).jobs.set(`job-${i}`, {
+        jobId: `job-${i}`,
+        type: 'image',
+        ownerHash: `hash-${i}`,
+        status: i === 249 ? 'PROCESSING' : 'DONE',
+        createdAt: new Date(baseDate + i * 1000),
+        finishedAt: new Date(baseDate + i * 1000 + 500),
+      });
+    }
+
+    (manager as any).pruneOldJobs();
+
+    // Completed jobs pruned to max 200 + active job retained
+    expect((manager as any).jobs.size).toBeLessThanOrEqual(201);
+    // Active job must be retained
+    expect((manager as any).jobs.has('job-249')).toBe(true);
+    // Oldest completed job (job-0) must be pruned
+    expect((manager as any).jobs.has('job-0')).toBe(false);
+  });
+
+  it('load test: 100 image jobs with concurrency=4 and maxQueue=10 limits active<=4, queued<=10, rejects rest with JOB_QUEUE_FULL', async () => {
+    const manager = new JobManager({ image: 4 }, { image: 10 });
+    let unblockAll: () => void;
+    const gate = new Promise<void>((resolve) => { unblockAll = resolve; });
+
+    let activeCount = 0;
+    let maxActiveSeen = 0;
+    let completedCount = 0;
+    let rejectedCount = 0;
+
+    const promises: Promise<unknown>[] = [];
+
+    for (let i = 0; i < 100; i++) {
+      const p = manager.execute('image', `owner-${i % 10}`, async () => {
+        activeCount++;
+        if (activeCount > maxActiveSeen) maxActiveSeen = activeCount;
+        await gate;
+        activeCount--;
+        completedCount++;
+        return `done-${i}`;
+      }).catch((err) => {
+        if (err.code === ErrorCode.JOB_QUEUE_FULL) {
+          rejectedCount++;
+        } else {
+          throw err;
+        }
+      });
+      promises.push(p);
+    }
+
+    // Yield to let synchronous microtask rejections settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Exactly 4 are active, 10 are queued in memory, and 86 were rejected immediately
+    expect(maxActiveSeen).toBe(4);
+    expect((manager as any).queues.image.length).toBe(10);
+    expect(rejectedCount).toBe(86);
+
+    // Unblock the active jobs so queued jobs can finish
+    unblockAll!();
+    await Promise.all(promises);
+
+    // Total completed jobs should be 4 + 10 = 14
+    expect(completedCount).toBe(14);
+    expect(rejectedCount).toBe(86);
+    expect(completedCount + rejectedCount).toBe(100);
+  });
 });
 
 describe('BatchStickerService', () => {

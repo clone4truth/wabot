@@ -24,9 +24,9 @@ Bot WhatsApp modular untuk pembuatan dan konversi stiker tingkat lanjut mengguna
 - **Keamanan & Privasi**: HMAC webhook, exact-origin SSRF protection, bounded temp cleanup, rate limiting, and zero sensitive chat logging.
 
 Untuk dokumentasi lengkap perintah dan arsitektur, lihat:
-- [Panduan Command](file:///home/seno/Project/stikerbot/docs/commands.md)
-- [Arsitektur Generator System](file:///home/seno/Project/stikerbot/docs/generator-system.md)
-- [Dokumen Arsitektur Monolith](file:///home/seno/Project/stikerbot/docs/architecture.md)
+- [Panduan Command](docs/commands.md)
+- [Arsitektur Generator System](docs/generator-system.md)
+- [Dokumen Arsitektur Monolith](docs/architecture.md)
 
 ## Keamanan & Standar Operasional
 

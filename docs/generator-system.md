@@ -68,8 +68,8 @@ Lokasi: `src/stickers/background-removal/`
 
 Arsitektur swappable melalui interface `BackgroundRemovalProvider`:
 - `DisabledBackgroundRemovalProvider`: Menolak dengan aman (`FEATURE_DISABLED`) jika belum diaktifkan.
-- `LocalBackgroundRemovalProvider`: Pemisahan latar belakang berbasis sampel warna pojok dan jarak warna pada RGBA lokal tanpa dependensi cloud.
-- `ApiBackgroundRemovalProvider`: Menghubungi endpoint API eksternal yang dikonfigurasi melalui variabel lingkungan (`BACKGROUND_REMOVAL_API_URL`), terlindungi dari SSRF (URL tidak dikontrol user).
+- `LocalBackgroundRemovalProvider`: Basic local background removal berbasis sampel warna pojok dan jarak warna RGBA; optimal untuk latar belakang sederhana atau mendekati seragam.
+- `ApiBackgroundRemovalProvider`: Menghubungi endpoint API eksternal yang dikonfigurasi melalui variabel lingkungan (`BACKGROUND_REMOVAL_API_URL`), terlindungi dari SSRF (URL tidak dikontrol user) dengan batas payload streaming (`BACKGROUND_REMOVAL_MAX_RESPONSE_BYTES`).
 
 Fitur turunan:
 - **Subject Smart Crop**: Menganalisis kanal alpha untuk menentukan kotak pembatas (bounding box) objek utama, menambahkan padding aman 10–15%, dan memusatkan objek pada kanvas 512×512.
@@ -81,9 +81,15 @@ Fitur turunan:
 
 Lokasi: `src/stickers/jobs/job-manager.ts`
 
-Mengontrol alokasi sumber daya prosesor dan memori tanpa dependensi eksternal seperti Redis/BullMQ:
-- **Image Queue**: Maksimal `MAX_IMAGE_JOBS` konkuren (default: 4).
-- **Video Queue**: Maksimal `MAX_VIDEO_JOBS` konkuren (default: 2).
-- **Animation Queue**: Maksimal `MAX_ANIMATION_JOBS` konkuren (default: 2).
-- **Background Queue**: Maksimal `MAX_BACKGROUND_JOBS` konkuren (default: 1).
-- **Privasi & Isolasi**: Pengecekan status job (`!job`) hanya menampilkan antrean milik pengirim bersangkutan (`ownerHash`).
+Mengontrol alokasi sumber daya prosesor dan memori secara strictly bounded tanpa dependensi eksternal:
+- **Concurrency Limits**: `MAX_IMAGE_JOBS` (4), `MAX_VIDEO_JOBS` (2), `MAX_ANIMATION_JOBS` (2), `MAX_BACKGROUND_JOBS` (1).
+- **Bounded Queues**: `MAX_IMAGE_QUEUE` (50), `MAX_VIDEO_QUEUE` (20), `MAX_ANIMATION_QUEUE` (20), `MAX_BACKGROUND_QUEUE` (10). Overflow langsung ditolak (`JOB_QUEUE_FULL`).
+- **Queue Wait Timeout & Cancellation**: Waktu tunggu antrean diperhitungkan dalam deadline total; job yang dibatalkan saat masih `QUEUED` tidak akan pernah dieksekusi.
+- **Privasi & Isolasi**: Metadata job hanya menyimpan `ownerHash = hashIdentifier(senderId)` sehingga nomor atau identitas pribadi pengirim tidak pernah tersimpan di memori.
+- **History Pruning**: Menyimpan maksimal 200 job yang sudah selesai dengan kebijakan eviksi oldest-first dan TTL pruning (`JOB_HISTORY_TTL_SECONDS`).
+
+---
+
+## 6. Batch Foundation
+
+`BatchStickerService` (`src/stickers/batch/batch.service.ts`) dirancang sebagai fondasi internal untuk pemrosesan batch stiker secara terkoordinasi melalui `JobManager`. Perintah WhatsApp user-facing (`!stiker batch`) sengaja belum diaktifkan hingga format payload album dari WAHA didukung secara penuh dan stabil.

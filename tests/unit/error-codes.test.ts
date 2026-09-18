@@ -13,6 +13,7 @@ describe('ErrorCode', () => {
     expect(ErrorCode.RATE_LIMITED).toBe('RATE_LIMITED');
     expect(ErrorCode.WAHA_SEND_FAILED).toBe('WAHA_SEND_FAILED');
     expect(ErrorCode.INVALID_WEBHOOK_SIGNATURE).toBe('INVALID_WEBHOOK_SIGNATURE');
+    expect(ErrorCode.JOB_QUEUE_FULL).toBe('JOB_QUEUE_FULL');
   });
 });
 

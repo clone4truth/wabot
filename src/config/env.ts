@@ -31,13 +31,19 @@ export interface EnvConfig {
   maxVideoJobs: number;
   maxBackgroundJobs: number;
   maxAnimationJobs: number;
+  maxImageQueue: number;
+  maxVideoQueue: number;
+  maxAnimationQueue: number;
+  maxBackgroundQueue: number;
   backgroundRemovalProvider: 'local' | 'api' | 'disabled';
   backgroundRemovalApiUrl: string;
   backgroundRemovalApiKey: string;
   backgroundRemovalTimeoutMs: number;
   backgroundRemovalConcurrency: number;
+  backgroundRemovalMaxResponseBytes: number;
   batchMaxItems: number;
   batchConcurrency: number;
+  jobHistoryTtlSeconds: number;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -73,13 +79,19 @@ const env: EnvConfig = {
   maxVideoJobs: Number(process.env.MAX_VIDEO_JOBS) || 2,
   maxBackgroundJobs: Number(process.env.MAX_BACKGROUND_JOBS) || 1,
   maxAnimationJobs: Number(process.env.MAX_ANIMATION_JOBS) || 2,
+  maxImageQueue: Number(process.env.MAX_IMAGE_QUEUE) || 50,
+  maxVideoQueue: Number(process.env.MAX_VIDEO_QUEUE) || 20,
+  maxAnimationQueue: Number(process.env.MAX_ANIMATION_QUEUE) || 20,
+  maxBackgroundQueue: Number(process.env.MAX_BACKGROUND_QUEUE) || 10,
   backgroundRemovalProvider: ((process.env.BACKGROUND_REMOVAL_PROVIDER as any) || 'disabled'),
   backgroundRemovalApiUrl: process.env.BACKGROUND_REMOVAL_API_URL || '',
   backgroundRemovalApiKey: process.env.BACKGROUND_REMOVAL_API_KEY || '',
   backgroundRemovalTimeoutMs: Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS) || 30000,
   backgroundRemovalConcurrency: Number(process.env.BACKGROUND_REMOVAL_CONCURRENCY) || 1,
+  backgroundRemovalMaxResponseBytes: Number(process.env.BACKGROUND_REMOVAL_MAX_RESPONSE_BYTES) || 20971520,
   batchMaxItems: Number(process.env.BATCH_MAX_ITEMS) || 10,
   batchConcurrency: Number(process.env.BATCH_CONCURRENCY) || 2,
+  jobHistoryTtlSeconds: Number(process.env.JOB_HISTORY_TTL_SECONDS) || 3600,
 };
 
 export default env;

@@ -19,7 +19,14 @@ export class TemplateRegistry {
   }
 
   register(template: StickerTemplate): void {
-    this.templates.set(template.name.toLowerCase(), template);
+    const key = template.name?.trim().toLowerCase();
+    if (!key) {
+      throw new Error('Template name cannot be empty');
+    }
+    if (this.templates.has(key)) {
+      throw new Error(`Template "${key}" already registered`);
+    }
+    this.templates.set(key, template);
   }
 
   get(name: string): StickerTemplate | undefined {

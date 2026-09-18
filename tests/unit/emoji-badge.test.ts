@@ -53,6 +53,22 @@ describe('EmojiGenerator', () => {
     );
   });
 
+  it('accepts valid emojis: pictographic, flag, ZWJ, keycap', () => {
+    const validCases = ['😂', '❤️', '👨‍💻', '👨‍👩‍👧‍👦', '🇮🇩', '1️⃣'];
+    for (const em of validCases) {
+      expect(() => generator.validate({ type: 'emoji', text: em }, context)).not.toThrow();
+    }
+  });
+
+  it('rejects non-emoji characters like plain letters or words', () => {
+    const invalidCases = ['A', 'AB', 'test', '1234'];
+    for (const inv of invalidCases) {
+      expect(() => generator.validate({ type: 'emoji', text: inv }, context)).toThrow(
+        /karakter emoji yang valid/i
+      );
+    }
+  });
+
   it('rejects empty input', () => {
     expect(() => generator.validate({ type: 'emoji', text: '   ' }, context)).toThrow();
   });
@@ -135,6 +151,30 @@ describe('CaptionGenerator', () => {
     );
     expect(result.width).toBe(512);
     expect(result.height).toBe(512);
+  });
+
+  it('renders adaptive layout for long caption and emoji without clipping', async () => {
+    await createFixtureJpg();
+    const result = await generator.process(
+      {
+        type: 'caption',
+        mediaUrl: 'http://example.com/test.jpg',
+        text: 'Teks caption panjang adaptif dengan emoji 🚀✨ untuk memastikan layout banner menyesuaikan tinggi tanpa terpotong sama sekali.',
+      },
+      context
+    );
+    expect(result.width).toBe(512);
+    expect(result.height).toBe(512);
+  });
+
+  it('rejects caption that exceeds max banner capacity with TEXT_TOO_LONG', () => {
+    const tooLong = 'Kata '.repeat(80);
+    expect(() =>
+      generator.validate(
+        { type: 'caption', mediaUrl: 'http://example.com/test.jpg', text: tooLong },
+        context
+      )
+    ).toThrow();
   });
 
   it('rejects missing image mediaUrl', () => {

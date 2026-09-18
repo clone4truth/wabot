@@ -23,7 +23,14 @@ export class EffectRegistry {
   }
 
   register(effect: ImageEffect): void {
-    this.effects.set(effect.name.toLowerCase(), effect);
+    const key = effect.name?.trim().toLowerCase();
+    if (!key) {
+      throw new Error('Effect name cannot be empty');
+    }
+    if (this.effects.has(key)) {
+      throw new Error(`Effect "${key}" already registered`);
+    }
+    this.effects.set(key, effect);
   }
 
   get(name: string): ImageEffect | undefined {

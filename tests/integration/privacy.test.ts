@@ -64,4 +64,24 @@ describe('Production log bebas data mentah', () => {
     // Korelasi via hash tetap ada.
     expect(dumped).toContain(hashIdentifier(CHAT));
   });
+
+  it('JobMetadata.ownerHash menyimpan hashIdentifier, bukan raw sender ID', async () => {
+    const rawSender = '62899887766@c.us';
+    const raw = JSON.stringify({
+      event: 'message', session: 'bot',
+      payload: { id: 'priv-msg-job', timestamp: Date.now(), from: rawSender, to: 'bot@c.us', body: '!ttp PrivacyTest', hasMedia: false },
+    });
+    const sig = crypto.createHmac('sha512', KEY).update(raw).digest('hex');
+    await fastify.inject({
+      method: 'POST', url: '/webhooks', payload: raw,
+      headers: { 'content-type': 'application/json', 'x-webhook-hmac': sig, 'x-webhook-hmac-algorithm': 'sha512' },
+    });
+
+    const { defaultJobManager } = await import('../../src/stickers/jobs/job-manager');
+    const jobs = (defaultJobManager as any).jobs;
+    for (const job of jobs.values()) {
+      expect(job.ownerHash).not.toBe(rawSender);
+      expect(job.ownerHash).not.toContain('62899887766');
+    }
+  });
 });

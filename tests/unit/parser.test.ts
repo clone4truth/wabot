@@ -190,3 +190,15 @@ describe('Custom prefix', () => {
     expect(isCommand('!ping', '?')).toBe(false);
   });
 });
+
+describe('findCommand & Aliases', () => {
+  it('resolves command by exact name and aliases', async () => {
+    const { findCommand } = await import('../../src/commands/metadata');
+    expect(findCommand('stiker removebg')?.name).toBe('stiker removebg');
+    expect(findCommand('removebg')?.name).toBe('stiker removebg');
+    expect(findCommand('blur')?.name).toBe('stiker blur');
+    expect(findCommand('caption')?.name).toBe('stiker caption');
+    expect(findCommand('ttp')?.name).toBe('ttp');
+    expect(findCommand('unknownxyz')).toBeUndefined();
+  });
+});

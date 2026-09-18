@@ -10,6 +10,7 @@ import { ErrorCode } from '../errors/error-codes';
 import { GeneratorRegistry, defaultGeneratorRegistry } from './generators/registry';
 import { GeneratorContext, GeneratorInput } from './generators/types';
 import { JobManager, defaultJobManager, JobType } from './jobs/job-manager';
+import { hashIdentifier } from '../observability/privacy';
 
 export class StickerService {
   private inputResolver = new InputResolver();
@@ -81,32 +82,13 @@ export class StickerService {
     }
 
     try {
-      const isHeavy = input.type === 'video' || input.type === 'togif' || input.type === 'attp';
-      let raw: ProcessingResult | null;
-
-      if (isHeavy) {
-        raw = await this.jobManager.execute(jobType, senderId, () =>
-          generator.process(generatorInput, context)
-        );
-      } else {
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          raw = await Promise.race([
-            this.jobManager.execute(jobType, senderId, () =>
-              generator.process(generatorInput, context)
-            ),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')),
-                timeoutMs
-              );
-              if (typeof (timer as any).unref === 'function') (timer as any).unref();
-            }),
-          ]);
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      }
+      const ownerHash = hashIdentifier(senderId);
+      const raw = await this.jobManager.execute(
+        jobType,
+        ownerHash,
+        () => generator.process(generatorInput, context),
+        { timeoutMs },
+      );
 
       return this.withPackMeta(raw, input.type);
     } finally {

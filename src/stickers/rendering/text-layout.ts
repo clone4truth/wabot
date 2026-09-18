@@ -193,3 +193,68 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
     `Teks tidak muat dijadikan stiker: ${String((lastError as Error)?.message || lastError)}`,
   );
 }
+
+export interface FitTextRegionOptions {
+  text: string;
+  width: number;
+  height: number;
+  maxFontSize?: number;
+  minFontSize?: number;
+  lineHeightFactor?: number;
+  maxCharsPerLine?: (fontSize: number) => number;
+}
+
+export interface FittedRegionResult {
+  lines: string[];
+  fontSize: number;
+  lineHeight: number;
+  totalHeight: number;
+}
+
+export function fitTextIntoRegion(options: FitTextRegionOptions): FittedRegionResult {
+  const {
+    text,
+    width,
+    height,
+    maxFontSize = 36,
+    minFontSize = 14,
+    lineHeightFactor = 1.25,
+  } = options;
+
+  // Grapheme-aware char width estimation
+  const graphemes = splitGraphemes(text);
+  let wideCount = 0;
+  for (const g of graphemes) {
+    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(g)) {
+      wideCount++;
+    }
+  }
+  const wideRatio = graphemes.length > 0 ? wideCount / graphemes.length : 0;
+  const charWidthFactor = 0.65 + wideRatio * 0.55;
+
+  for (let size = maxFontSize; size >= minFontSize; size -= 2) {
+    const charsPerLine = options.maxCharsPerLine
+      ? options.maxCharsPerLine(size)
+      : Math.max(4, Math.floor(width / (size * charWidthFactor)));
+
+    // IMPORTANT: Never pass maxLines to wrapWords so NO content is silently discarded!
+    const lines = wrapWords(text, charsPerLine);
+    const lineHeight = Math.round(size * lineHeightFactor);
+    const totalHeight = lines.length * lineHeight;
+
+    if (totalHeight <= height) {
+      return {
+        lines,
+        fontSize: size,
+        lineHeight,
+        totalHeight,
+      };
+    }
+  }
+
+  throw new AppError(
+    ErrorCode.TEXT_TOO_LONG,
+    '❌ Teks terlalu panjang untuk ukuran layout yang tersedia',
+  );
+}
+

@@ -63,7 +63,7 @@ export class ShadowEffect implements ImageEffect {
   readonly name = 'shadow';
 
   async apply(image: Sharp.Sharp): Promise<Sharp.Sharp> {
-    const imgBuffer = await image.ensureAlpha().toBuffer();
+    const imgBuffer = await image.ensureAlpha().png().toBuffer();
     const meta = await Sharp(imgBuffer).metadata();
     const w = meta.width || 512;
     const h = meta.height || 512;
@@ -78,13 +78,15 @@ export class ShadowEffect implements ImageEffect {
       .png()
       .toBuffer();
 
+    const pad = 16;
     const canvas = await Sharp({
-      create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+      create: { width: w + pad, height: h + pad, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
     })
       .composite([
         { input: shadowLayer, top: 10, left: 10 },
         { input: imgBuffer, top: 0, left: 0 },
       ])
+      .resize(w, h, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png()
       .toBuffer();
 

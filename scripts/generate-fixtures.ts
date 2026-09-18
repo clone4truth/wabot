@@ -87,30 +87,75 @@ async function main() {
 
     // 6b. Image Effects
     const blurRes = await imageProc.process(imageUrl, 'blur');
-    fs.writeFileSync(path.join(outDir, 'effect-blur.webp'), blurRes.buffer);
-    console.log('✓ effect-blur.webp');
+    fs.writeFileSync(path.join(outDir, 'blur.webp'), blurRes.buffer);
+    console.log('✓ blur.webp');
+
+    const grayRes = await imageProc.process(imageUrl, 'grayscale');
+    fs.writeFileSync(path.join(outDir, 'grayscale.webp'), grayRes.buffer);
+    console.log('✓ grayscale.webp');
 
     const pixelRes = await imageProc.process(imageUrl, 'pixel');
-    fs.writeFileSync(path.join(outDir, 'effect-pixel.webp'), pixelRes.buffer);
-    console.log('✓ effect-pixel.webp');
+    fs.writeFileSync(path.join(outDir, 'pixel.webp'), pixelRes.buffer);
+    console.log('✓ pixel.webp');
 
-    // 7. Meme
+    const shadowRes = await imageProc.process(imageUrl, 'shadow');
+    fs.writeFileSync(path.join(outDir, 'shadow.webp'), shadowRes.buffer);
+    console.log('✓ shadow.webp');
+
+    // 7. Caption
+    const { CaptionGenerator } = await import('../src/stickers/generators/caption.generator');
+    const capRes = await new CaptionGenerator().process(
+      { type: 'caption', mediaUrl: imageUrl, text: 'Halo Sahabat!', options: { position: 'bottom' } },
+      { chatId: 'c', senderId: 's' },
+    );
+    fs.writeFileSync(path.join(outDir, 'caption.webp'), capRes.buffer);
+    console.log('✓ caption.webp');
+
+    // 8. RemoveBG, Subject, Outline
+    const { RemoveBgGenerator } = await import('../src/stickers/generators/removebg.generator');
+    const { defaultBackgroundRemovalService } = await import('../src/stickers/background-removal/service');
+    const { LocalBackgroundRemovalProvider } = await import('../src/stickers/background-removal/providers/local.provider');
+    defaultBackgroundRemovalService.setProvider(new LocalBackgroundRemovalProvider());
+    const rmbgGen = new RemoveBgGenerator(defaultBackgroundRemovalService);
+
+    const rmbgRes = await rmbgGen.process(
+      { type: 'removebg', mediaUrl: imageUrl },
+      { chatId: 'c', senderId: 's' },
+    );
+    fs.writeFileSync(path.join(outDir, 'removebg.webp'), rmbgRes.buffer);
+    console.log('✓ removebg.webp');
+
+    const subjRes = await rmbgGen.process(
+      { type: 'subject', mediaUrl: imageUrl },
+      { chatId: 'c', senderId: 's' },
+    );
+    fs.writeFileSync(path.join(outDir, 'subject.webp'), subjRes.buffer);
+    console.log('✓ subject.webp');
+
+    const outlRes = await rmbgGen.process(
+      { type: 'outline', mediaUrl: imageUrl, options: { color: 'black' } },
+      { chatId: 'c', senderId: 's' },
+    );
+    fs.writeFileSync(path.join(outDir, 'outline.webp'), outlRes.buffer);
+    console.log('✓ outline.webp');
+
+    // 9. Meme
     const memeProc = new MemeProcessor();
     const memeRes = await memeProc.process(imageUrl, 'TEKS ATAS | TEKS BAWAH');
     fs.writeFileSync(path.join(outDir, 'meme.webp'), memeRes.buffer);
     console.log('✓ meme.webp');
 
-    // 8. TTP Style Presets
+    // 10. TTP Style Presets
     const ttpGold = await ttpProc.process('GOLD VIP EDITION', 'gold');
     fs.writeFileSync(path.join(outDir, 'ttp-gold.webp'), ttpGold.buffer);
     console.log('✓ ttp-gold.webp');
 
-    // 9. ATTP Effect Presets
+    // 11. ATTP Effect Presets
     const attpFade = await attpProc.process('FADE TEXT', 'fade');
     fs.writeFileSync(path.join(outDir, 'attp-fade.webp'), attpFade.buffer);
     console.log('✓ attp-fade.webp');
 
-    // 10. Templates
+    // 12. Templates
     const { TerminalTemplate, BreakingTemplate } = await import('../src/stickers/templates/builtin.templates');
     const termRes = await new TerminalTemplate().render({ text: 'npm run build' });
     fs.writeFileSync(path.join(outDir, 'template-terminal.webp'), termRes.buffer);
@@ -120,11 +165,21 @@ async function main() {
     fs.writeFileSync(path.join(outDir, 'template-breaking.webp'), breakRes.buffer);
     console.log('✓ template-breaking.webp');
 
-    // 11. Emoji & Badge
+    // 13. Emoji Visual QA Fixtures
     const { EmojiGenerator } = await import('../src/stickers/generators/emoji.generator');
-    const emojiSticker = await new EmojiGenerator().process({ type: 'emoji', text: '😂🔥' }, { chatId: 'c', senderId: 's' });
-    fs.writeFileSync(path.join(outDir, 'emoji-sticker.webp'), emojiSticker.buffer);
-    console.log('✓ emoji-sticker.webp');
+    const emojiGen = new EmojiGenerator();
+
+    const emojiSingle = await emojiGen.process({ type: 'emoji', text: '😂' }, { chatId: 'c', senderId: 's' });
+    fs.writeFileSync(path.join(outDir, 'emoji-single.webp'), emojiSingle.buffer);
+    console.log('✓ emoji-single.webp');
+
+    const emojiFamily = await emojiGen.process({ type: 'emoji', text: '👨‍👩‍👧‍👦' }, { chatId: 'c', senderId: 's' });
+    fs.writeFileSync(path.join(outDir, 'emoji-family.webp'), emojiFamily.buffer);
+    console.log('✓ emoji-family.webp');
+
+    const emojiFlag = await emojiGen.process({ type: 'emoji', text: '🇮🇩' }, { chatId: 'c', senderId: 's' });
+    fs.writeFileSync(path.join(outDir, 'emoji-flag.webp'), emojiFlag.buffer);
+    console.log('✓ emoji-flag.webp');
 
     const { BadgeGenerator } = await import('../src/stickers/generators/badge.generator');
     const badgeSticker = await new BadgeGenerator().process({ type: 'badge', text: 'ONLINE' }, { chatId: 'c', senderId: 's' });

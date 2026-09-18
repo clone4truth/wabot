@@ -124,9 +124,25 @@ textStylePresets.default = {
   name: 'default',
 };
 
+import { AppError } from '../../errors/app-error';
+import { ErrorCode } from '../../errors/error-codes';
+
+export function resolveTtpStyle(name: string): TextStylePreset {
+  const clean = name.trim().toLowerCase();
+  const preset = textStylePresets[clean];
+  if (!preset) {
+    const valid = Object.keys(textStylePresets).filter((k) => k !== 'default').join(', ');
+    throw new AppError(
+      ErrorCode.INVALID_ARGUMENT,
+      `❌ Style "${name}" tidak tersedia.\nPreset: ${valid}.`,
+    );
+  }
+  return preset;
+}
+
 export function getTtpStyle(name?: string): TextStylePreset {
   if (!name) return textStylePresets.default;
-  return textStylePresets[name.toLowerCase()] ?? textStylePresets.default;
+  return resolveTtpStyle(name);
 }
 
 export function listTtpStyles(): string[] {

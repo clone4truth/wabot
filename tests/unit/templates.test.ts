@@ -39,4 +39,23 @@ describe('Sticker Templates', () => {
   it('melempar error jika template tidak dikenal', () => {
     expect(() => defaultTemplateRegistry.resolve('non_existent')).toThrow();
   });
+
+  it('render teks panjang dan emoji dengan adaptive layout tanpa pemotongan diam-diam', async () => {
+    for (const name of ['terminal', 'breaking', 'wanted', 'minimal']) {
+      const tpl = defaultTemplateRegistry.resolve(name);
+      const res = await tpl.render({
+        text: 'Pengumuman penting hari ini: server akan dilakukan maintenance rutin pada jam 02:00 WIB 🚀✨ Mohon simpan pekerjaan Anda!',
+      });
+      expect(res.width).toBe(512);
+      expect(res.height).toBe(512);
+    }
+  });
+
+  it('menolak teks yang melebihi kapasitas dengan controlled TEXT_TOO_LONG', async () => {
+    const tpl = defaultTemplateRegistry.resolve('wanted');
+    const excessivelyLong = 'Kata '.repeat(100);
+    await expect(tpl.render({ text: excessivelyLong })).rejects.toMatchObject({
+      code: ErrorCode.TEXT_TOO_LONG,
+    });
+  });
 });
