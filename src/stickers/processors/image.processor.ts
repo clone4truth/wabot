@@ -62,13 +62,17 @@ export class ImageStickerProcessor {
   }
 
   private async downloadAndValidate(imageUrl: string) {
-    const { filePath, mimeType } = await import('../../media/downloader').then(m =>
-      m.downloadMedia(imageUrl)
-    ).catch(() => {
-      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, 'Failed to download media');
-    });
+    let filePath: string;
+    let mimeType: string;
+    try {
+      ({ filePath, mimeType } = await import('../../media/downloader').then(m =>
+        m.downloadMedia(imageUrl)
+      ));
+    } catch (err) {
+      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download media: ${String(err)}`);
+    }
 
-    if (!validateImageContent(filePath)) {
+    if (!(await validateImageContent(filePath))) {
       throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Invalid image content');
     }
 

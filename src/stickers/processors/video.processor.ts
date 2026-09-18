@@ -9,8 +9,8 @@ import { downloadMedia } from '../../media/downloader';
 
 export class VideoStickerProcessor {
   async process(videoUrl: string): Promise<StickerResult> {
-    const { filePath } = await downloadMedia(videoUrl).catch(() => {
-      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, 'Failed to download video');
+    const { filePath } = await downloadMedia(videoUrl).catch((err) => {
+      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download video: ${String(err)}`);
     });
 
     try {

@@ -13,14 +13,21 @@ export interface DownloadResult {
 }
 
 export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
-  if (!isAllowedOrigin(mediaUrl)) {
-    throw new Error('SSRF violation: URL not allowed');
+  const resolvedUrl = resolveMediaUrl(mediaUrl);
+  if (!isAllowedOrigin(resolvedUrl)) {
+    throw new Error(`SSRF violation: URL not allowed (${redactUrl(resolvedUrl)})`);
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
-  const response = await fetch(mediaUrl, { signal: controller.signal });
-  clearTimeout(timeout);
+  let response;
+  try {
+    response = await fetch(resolvedUrl, { signal: controller.signal });
+  } catch (err) {
+    throw new Error(`Failed to download media: ${String(err)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to download media: ${response.status}`);
@@ -54,4 +61,32 @@ export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
   logger.info('Media downloaded', { filePath, mimeType: contentType, size: buffer.length });
 
   return { filePath, mimeType: contentType, size: buffer.length };
+}
+
+// WAHA sering mengisi media.url dengan host lokalnya sendiri
+// (mis. http://localhost:3000/api/files/...) yang tidak bisa dijangkau
+// dari container bot. Tukar origin-nya ke WAHA_BASE_URL yang publik.
+export function resolveMediaUrl(mediaUrl: string): string {
+  try {
+    const parsed = new URL(mediaUrl);
+    if (['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)) {
+      const base = new URL(env.wahaBaseUrl);
+      parsed.protocol = base.protocol;
+      parsed.host = base.host;
+      parsed.port = base.port;
+      return parsed.toString();
+    }
+    return mediaUrl;
+  } catch {
+    return mediaUrl;
+  }
+}
+
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return '(invalid url)';
+  }
 }

@@ -10,8 +10,8 @@ export class MemeProcessor {
   async process(imageUrl: string, memeText: string): Promise<StickerResult> {
     const [topText, bottomText] = memeText.split('|').map(s => s.trim());
 
-    const { filePath } = await downloadMedia(imageUrl).catch(() => {
-      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, 'Failed to download image');
+    const { filePath } = await downloadMedia(imageUrl).catch((err) => {
+      throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download image: ${String(err)}`);
     });
 
     try {
