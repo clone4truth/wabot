@@ -38,7 +38,7 @@ export class WAHAClient {
 
     if (!response.ok) {
       const responseBody = await response.text().catch(() => '');
-      logger.error(`WAHA ${action} failed`, { chatId, status: response.status, responseBody: responseBody.slice(0, 300) });
+      logger.error(`WAHA ${action} failed with status ${response.status}: ${responseBody.slice(0, 200)}`, { chatId, status: response.status, responseBody: responseBody.slice(0, 300) });
       throw new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
     }
 
