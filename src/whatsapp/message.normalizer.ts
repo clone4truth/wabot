@@ -14,7 +14,13 @@ export class MessageNormalizer {
     const isGroup = msg.from.includes('g.us');
 
     // Di grup, pengirim ada di participant; di DM pengirim = from.
-    const senderId = msg.participant || msg.from;
+    // Varian nama field antar engine: participant / sender / _data.sender.
+    const senderId =
+      msg.participant ||
+      (msg as any).sender ||
+      (msg._data?.sender?.id as string | undefined) ||
+      (typeof msg._data?.sender === 'string' ? (msg._data.sender as string) : undefined) ||
+      msg.from;
 
     const normalized: NormalizedMessage = {
       eventId: `${payload.session}_${payload.payload.id}`,
