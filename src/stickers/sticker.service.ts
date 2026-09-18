@@ -58,24 +58,33 @@ export class StickerService {
 
     switch (input.type) {
       case 'text': {
-        // Resolve nama + foto via satu panggilan overview per ID unik (best-effort).
+        // Resolve nama tersimpan + info chat per ID unik (best-effort, paralel).
+        // Prioritas nama: kontak tersimpan > overview > pushName payload > ID.
         const ids = [...new Set([content.senderId, content.quotedSenderId].filter(Boolean))] as string[];
-        const infos = await Promise.all(ids.map((id) => this.wahaClient.getChatInfo(id).catch(() => null)));
-        const infoById = new Map(ids.map((id, i) => [id, infos[i]]));
-        const senderInfo = content.senderId ? infoById.get(content.senderId) : undefined;
-        const quotedInfo = content.quotedSenderId ? infoById.get(content.quotedSenderId) : undefined;
+        const resolved = await Promise.all(
+          ids.map(async (id) => {
+            const [savedName, info] = await Promise.all([
+              this.wahaClient.getContactSavedName(id).catch(() => undefined),
+              this.wahaClient.getChatInfo(id).catch(() => null),
+            ]);
+            return { id, savedName, info };
+          }),
+        );
+        const byId = new Map(resolved.map((r) => [r.id, r]));
+        const sender = content.senderId ? byId.get(content.senderId) : undefined;
+        const quotedRes = content.quotedSenderId ? byId.get(content.quotedSenderId) : undefined;
 
-        const senderName = senderInfo?.name || content.senderName;
+        const senderName = sender?.savedName || sender?.info?.name || content.senderName;
         const quoted = content.quotedBody
           ? {
-              senderName: quotedInfo?.name || content.quotedSenderName || '?',
+              senderName: quotedRes?.savedName || quotedRes?.info?.name || content.quotedSenderName || '?',
               senderId: content.quotedSenderId,
               body: content.quotedBody,
             }
           : undefined;
 
-        let avatar = senderInfo?.picture
-          ? await this.wahaClient.fetchImage(senderInfo.picture).catch(() => null)
+        let avatar = sender?.info?.picture
+          ? await this.wahaClient.fetchImage(sender.info.picture).catch(() => null)
           : null;
         if (!avatar && content.senderId) {
           avatar = await this.wahaClient.getProfilePicture(content.senderId).catch(() => null);

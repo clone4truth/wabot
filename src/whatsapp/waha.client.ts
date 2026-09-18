@@ -97,6 +97,24 @@ export class WAHAClient {
     }
   }
 
+  // Best-effort: nama kontak yang TERSIMPAN di HP pemilik session (bukan pushName).
+  async getContactSavedName(chatId: string): Promise<string | undefined> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(
+        `${this.baseUrl}/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(this.session)}`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (!res.ok) return undefined;
+      const data = (await res.json()) as any;
+      return this.cleanName(data?.name);
+    } catch {
+      return undefined;
+    }
+  }
+
   // Best-effort: info chat (nama + foto) via overview. null bila gagal.
   async getChatInfo(chatId: string): Promise<{ name?: string; picture?: string } | null> {
     try {
