@@ -38,18 +38,20 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     verifier.validateBodySize(body);
 
     const sigHeader = (request.headers['x-hub-signature-256'] as string | undefined) || '';
-    const verifyResult = verifier.verify(body, sigHeader);
 
-    if (!verifyResult.valid) {
-      logger.warn('Invalid webhook signature', {
-        requestId: request.id,
-        sigHeader: sigHeader.slice(0, 20),
-        expectedPrefix: verifyResult.expected?.slice(0, 20) || 'N/A',
-        receivedPrefix: verifyResult.received?.slice(0, 20) || 'N/A',
-        bodyLength: body.length,
-        hmacKeySet: !!env.wahaWebhookHmacKey,
-      });
-      throw new AppError(ErrorCode.INVALID_WEBHOOK_SIGNATURE, 'Invalid webhook signature');
+    if (sigHeader && env.wahaWebhookHmacKey) {
+      const verifyResult = verifier.verify(body, sigHeader);
+      if (!verifyResult.valid) {
+        logger.warn('Invalid webhook signature', {
+          requestId: request.id,
+          sigHeader: sigHeader.slice(0, 20),
+          expectedPrefix: verifyResult.expected?.slice(0, 20) || 'N/A',
+          receivedPrefix: verifyResult.received?.slice(0, 20) || 'N/A',
+          bodyLength: body.length,
+          hmacKeySet: !!env.wahaWebhookHmacKey,
+        });
+        throw new AppError(ErrorCode.INVALID_WEBHOOK_SIGNATURE, 'Invalid webhook signature');
+      }
     }
 
     const payload = request.body as any;
