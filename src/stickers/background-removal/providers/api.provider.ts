@@ -4,6 +4,13 @@ import env from '../../../config/env';
 import { AppError } from '../../../errors/app-error';
 import { ErrorCode } from '../../../errors/error-codes';
 
+// MIME allowlist yang diterima dari BG removal API response.
+// Tidak menggunakan image/* karena SVG, GIF, dll tidak valid sebagai input stiker.
+const ALLOWED_RESPONSE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+// Allowed actual Sharp format dari response.
+const ALLOWED_RESPONSE_FORMATS = new Set(['jpeg', 'png', 'webp']);
+
 export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
   readonly name = 'api';
 
@@ -14,6 +21,7 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
     } catch {
       throw new AppError(ErrorCode.INVALID_ARGUMENT, 'BACKGROUND_REMOVAL_API_URL tidak valid');
     }
+    // BG API bisa berupa localhost/internal — tidak diblokir seperti avatar public.
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new AppError(
         ErrorCode.INVALID_ARGUMENT,
@@ -35,7 +43,19 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
     this.validateUrl(apiUrl);
 
     const timeoutMs = options?.timeoutMs ?? env.backgroundRemovalTimeoutMs;
+    const callerSignal = options?.signal;
+
     const controller = new AbortController();
+
+    // Merge caller signal: bila caller abort → abort request ini
+    let externalHandler: (() => void) | undefined;
+    if (callerSignal && !callerSignal.aborted) {
+      externalHandler = () => controller.abort();
+      callerSignal.addEventListener('abort', externalHandler, { once: true });
+    } else if (callerSignal?.aborted) {
+      controller.abort();
+    }
+
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
@@ -60,11 +80,13 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
         );
       }
 
-      const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      if (contentType && !contentType.startsWith('image/')) {
+      // Validasi MIME: hanya jpeg, png, webp (bukan image/*)
+      const rawContentType = (response.headers.get('content-type') || '').toLowerCase();
+      const contentType = rawContentType.split(';')[0].trim();
+      if (contentType && !ALLOWED_RESPONSE_MIMES.has(contentType)) {
         throw new AppError(
           ErrorCode.MEDIA_DECODE_FAILED,
-          `Tipe konten API background removal tidak valid (${contentType})`,
+          `Tipe konten API background removal tidak valid (${contentType}). Hanya jpeg/png/webp diizinkan.`,
         );
       }
 
@@ -98,9 +120,15 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
       }
 
       const rawBuffer = Buffer.concat(chunks);
+
+      // Validasi dengan Sharp: gunakan limitInputPixels untuk mencegah pixel bomb.
+      const maxPixels = env.backgroundRemovalMaxPixels || 25_000_000;
       let metadata: Sharp.Metadata;
       try {
-        metadata = await Sharp(rawBuffer).metadata();
+        metadata = await Sharp(rawBuffer, {
+          failOn: 'warning',
+          limitInputPixels: maxPixels,
+        }).metadata();
       } catch {
         throw new AppError(
           ErrorCode.MEDIA_DECODE_FAILED,
@@ -115,6 +143,14 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
         );
       }
 
+      // Validasi format aktual (bukan hanya MIME header)
+      if (metadata.format && !ALLOWED_RESPONSE_FORMATS.has(metadata.format)) {
+        throw new AppError(
+          ErrorCode.MEDIA_DECODE_FAILED,
+          `Format aktual gambar BG removal tidak valid: ${metadata.format}`,
+        );
+      }
+
       const resultBuffer = await Sharp(rawBuffer)
         .ensureAlpha()
         .png()
@@ -122,7 +158,7 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
 
       return resultBuffer;
     } catch (err: any) {
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || err?.code === 'ABORT_ERR') {
         throw new AppError(
           ErrorCode.PROCESSING_TIMEOUT,
           'Background removal API timeout',
@@ -135,6 +171,9 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
       );
     } finally {
       clearTimeout(timer);
+      if (externalHandler && callerSignal) {
+        callerSignal.removeEventListener('abort', externalHandler);
+      }
     }
   }
 }

@@ -10,7 +10,11 @@ import fs from 'fs';
 import path from 'path';
 
 export class ToGifProcessor {
-  async process(stickerBuffer: Buffer, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<VideoResult> {
+  async process(
+    stickerBuffer: Buffer,
+    timeoutMs: number = env.videoProcessingTimeoutMs,
+    signal?: AbortSignal,
+  ): Promise<VideoResult> {
     let meta;
     try {
       meta = await Sharp(stickerBuffer).metadata();
@@ -89,6 +93,9 @@ export class ToGifProcessor {
     try {
       const concatLines: string[] = [];
       for (let i = 0; i < framePlans.length; i++) {
+        if (signal?.aborted) {
+          throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+        }
         const plan = framePlans[i];
         const frameFileName = `${i}.png`;
         const framePath = path.join(workdir, frameFileName);

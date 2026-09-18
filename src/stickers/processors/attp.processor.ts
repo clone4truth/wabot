@@ -15,19 +15,31 @@ import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
 import { defaultAnimationRegistry } from '../animations/registry';
 import { AnimationLayout } from '../animations/types';
 
+export interface AttpProcessOptions {
+  effect?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export class AttpProcessor {
   async process(
     text: string,
-    effectOrTimeout?: string | number,
+    optsOrEffect?: AttpProcessOptions | string | number,
     maybeTimeoutMs?: number,
   ): Promise<StickerResult> {
     let effectName: string | undefined;
     let timeoutMs = env.videoProcessingTimeoutMs;
+    let signal: AbortSignal | undefined;
 
-    if (typeof effectOrTimeout === 'number') {
-      timeoutMs = effectOrTimeout;
-    } else if (typeof effectOrTimeout === 'string') {
-      effectName = effectOrTimeout;
+    if (typeof optsOrEffect === 'object' && optsOrEffect !== null && !Array.isArray(optsOrEffect)) {
+      // New options object form
+      effectName = optsOrEffect.effect;
+      timeoutMs = optsOrEffect.timeoutMs ?? timeoutMs;
+      signal = optsOrEffect.signal;
+    } else if (typeof optsOrEffect === 'number') {
+      timeoutMs = optsOrEffect;
+    } else if (typeof optsOrEffect === 'string') {
+      effectName = optsOrEffect;
       if (typeof maybeTimeoutMs === 'number') {
         timeoutMs = maybeTimeoutMs;
       }
@@ -49,6 +61,9 @@ export class AttpProcessor {
       const fps = preset.fps;
 
       for (let i = 0; i < frameCount; i++) {
+        if (signal?.aborted) {
+          throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+        }
         const svg = preset.renderSvg(i, {
           text: clean,
           layout,

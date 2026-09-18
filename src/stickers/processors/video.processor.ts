@@ -9,9 +9,13 @@ import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 
 export class VideoStickerProcessor {
-  async process(videoUrl: string, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<StickerResult> {
+  async process(
+    videoUrl: string,
+    timeoutMs: number = env.videoProcessingTimeoutMs,
+    signal?: AbortSignal,
+  ): Promise<StickerResult> {
     const startTime = Date.now();
-    const { filePath } = await downloadMedia(videoUrl).catch((err) => {
+    const { filePath } = await downloadMedia(videoUrl, { timeoutMs, signal }).catch((err) => {
       if (err instanceof AppError) throw err;
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download video: ${String(err)}`);
     });
@@ -36,6 +40,10 @@ export class VideoStickerProcessor {
         throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Video terlalu besar');
       }
 
+      if (signal?.aborted) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+
       const elapsedBeforeFfmpeg = Date.now() - startTime;
       const remainingFfmpeg = timeoutMs - elapsedBeforeFfmpeg;
       if (remainingFfmpeg <= 0) {
@@ -56,6 +64,7 @@ export class VideoStickerProcessor {
       cleanupTempFile(outputPath);
     }
   }
+
 
   // Validasi output aktual: ada, >0 byte, WebP valid, <=512px, animated.
   private async validateOutput(outputPath: string): Promise<StickerResult> {

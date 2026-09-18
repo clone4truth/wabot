@@ -47,7 +47,10 @@ export class RemoveBgGenerator implements StickerGenerator {
       throw new AppError(ErrorCode.MODIFIER_REQUIRES_IMAGE, 'Fitur ini memerlukan gambar');
     }
 
-    const { filePath } = await downloadMedia(mediaUrl);
+    const { filePath } = await downloadMedia(mediaUrl, {
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+    });
 
     try {
       if (!(await validateImageContent(filePath))) {
@@ -55,7 +58,10 @@ export class RemoveBgGenerator implements StickerGenerator {
       }
 
       const inputBuffer = await fs.promises.readFile(filePath);
-      const transparentPng = await this.bgService.removeBackground(inputBuffer);
+      const transparentPng = await this.bgService.removeBackground(inputBuffer, {
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+      });
 
       const mode = (
         input.modifier ??

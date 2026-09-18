@@ -49,7 +49,7 @@ describe('JobManager deadline propagation', () => {
     expect(capturedCtx?.remainingTimeoutMs).toBeUndefined();
   });
 
-  it('propagates AbortSignal to task context', async () => {
+  it('propagates AbortSignal to task context (internal deadline signal)', async () => {
     const manager = new JobManager({ image: 1 });
     const controller = new AbortController();
     let capturedSignal: AbortSignal | undefined;
@@ -64,7 +64,41 @@ describe('JobManager deadline propagation', () => {
       { signal: controller.signal },
     );
 
-    expect(capturedSignal).toBe(controller.signal);
+    // Setelah JobManager upgrade: task menerima signal INTERNAL dari DeadlineContext.
+    // Signal ini adalah AbortSignal yang valid (bukan reference sama dengan external signal).
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(false);
+  });
+
+  it('external abort propagates to internal task signal', async () => {
+    const manager = new JobManager({ image: 1 });
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    let signalAbortedDuringTask = false;
+
+    const taskPromise = manager.execute(
+      'image',
+      'owner',
+      async (ctx) => {
+        capturedSignal = ctx?.signal;
+        // Tunggu sejenak agar bisa di-abort dari luar
+        await new Promise((r) => setTimeout(r, 50));
+        signalAbortedDuringTask = !!ctx?.signal?.aborted;
+        return 'ok';
+      },
+      { signal: controller.signal, timeoutMs: 5000 },
+    );
+
+    // Abort external signal setelah task mulai
+    await new Promise((r) => setTimeout(r, 10));
+    controller.abort();
+
+    await taskPromise.catch(() => {}); // task mungkin throw atau complete
+
+    // Internal signal harus menjadi aborted setelah external abort
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(true);
   });
 });
 

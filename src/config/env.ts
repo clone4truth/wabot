@@ -41,6 +41,12 @@ export interface EnvConfig {
   backgroundRemovalTimeoutMs: number;
   backgroundRemovalConcurrency: number;
   backgroundRemovalMaxResponseBytes: number;
+  /** Batas piksel untuk Sharp saat validasi respons BG API (cegah pixel bomb). */
+  backgroundRemovalMaxPixels: number;
+  /** Batas ukuran body avatar fetch (bytes). */
+  avatarMaxBytes: number;
+  /** Batas piksel untuk Sharp saat validasi avatar. */
+  avatarMaxPixels: number;
   batchMaxItems: number;
   batchConcurrency: number;
   jobHistoryTtlSeconds: number;
@@ -89,6 +95,9 @@ const env: EnvConfig = {
   backgroundRemovalTimeoutMs: Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS) || 30000,
   backgroundRemovalConcurrency: Number(process.env.BACKGROUND_REMOVAL_CONCURRENCY) || 1,
   backgroundRemovalMaxResponseBytes: Number(process.env.BACKGROUND_REMOVAL_MAX_RESPONSE_BYTES) || 20971520,
+  backgroundRemovalMaxPixels: Number(process.env.BACKGROUND_REMOVAL_MAX_PIXELS) || 25_000_000,
+  avatarMaxBytes: Number(process.env.AVATAR_MAX_BYTES) || 2 * 1024 * 1024,
+  avatarMaxPixels: Number(process.env.AVATAR_MAX_PIXELS) || 16_000_000,
   batchMaxItems: Number(process.env.BATCH_MAX_ITEMS) || 10,
   batchConcurrency: Number(process.env.BATCH_CONCURRENCY) || 2,
   jobHistoryTtlSeconds: Number(process.env.JOB_HISTORY_TTL_SECONDS) || 3600,

@@ -1,5 +1,7 @@
 export interface BackgroundRemovalOptions {
   timeoutMs?: number;
+  /** AbortSignal untuk cancellation dari caller. */
+  signal?: AbortSignal;
   [key: string]: unknown;
 }
 

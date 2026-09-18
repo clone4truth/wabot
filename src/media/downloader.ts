@@ -14,6 +14,14 @@ export interface DownloadResult {
   size: number;
 }
 
+export interface DownloadOptions {
+  /** Timeout maksimum untuk keseluruhan download (ms). Default: FETCH_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** AbortSignal dari caller untuk cancellation segera. */
+  signal?: AbortSignal;
+}
+
+
 const MAX_REDIRECTS = 3;
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -32,13 +40,28 @@ function assertHttpUrl(raw: string): URL {
 
 // Fetch manual agar setiap redirect ikut divalidasi exact WAHA origin allowlist (tidak buta
 // mengikuti redirect ke host external/attacker).
-async function fetchValidated(url: string, remaining: number = MAX_REDIRECTS): Promise<Response> {
+async function fetchValidated(
+  url: string,
+  opts: { timeoutMs: number; signal?: AbortSignal },
+  remaining: number = MAX_REDIRECTS,
+): Promise<Response> {
   assertHttpUrl(url);
   if (!isAllowedOrigin(url)) {
     throw new Error(`SSRF violation: URL not allowed (${redactUrl(url)})`);
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeoutMs = opts.timeoutMs;
+
+  // Merge caller signal: bila caller abort → abort download
+  let externalHandler: (() => void) | undefined;
+  if (opts.signal && !opts.signal.aborted) {
+    externalHandler = () => controller.abort();
+    opts.signal.addEventListener('abort', externalHandler, { once: true });
+  } else if (opts.signal?.aborted) {
+    controller.abort();
+  }
+
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -50,7 +73,7 @@ async function fetchValidated(url: string, remaining: number = MAX_REDIRECTS): P
       const location = response.headers.get('location');
       if (!location) throw new Error('Redirect tanpa Location');
       await response.arrayBuffer().catch(() => {});
-      return fetchValidated(new URL(location, url).toString(), remaining - 1);
+      return fetchValidated(new URL(location, url).toString(), opts, remaining - 1);
     }
     return response;
   } catch (err) {
@@ -58,6 +81,9 @@ async function fetchValidated(url: string, remaining: number = MAX_REDIRECTS): P
     throw new Error(`Failed to download media: ${String(err)}`);
   } finally {
     clearTimeout(timeout);
+    if (externalHandler && opts.signal) {
+      opts.signal.removeEventListener('abort', externalHandler);
+    }
   }
 }
 
@@ -78,9 +104,13 @@ async function readLimited(response: Response, maxBytes: number): Promise<Buffer
   return Buffer.concat(chunks);
 }
 
-export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
+export async function downloadMedia(mediaUrl: string, options?: DownloadOptions): Promise<DownloadResult> {
   const resolvedUrl = resolveMediaUrl(mediaUrl);
-  const response = await fetchValidated(resolvedUrl);
+  const effectiveTimeoutMs = options?.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const response = await fetchValidated(resolvedUrl, {
+    timeoutMs: Math.min(effectiveTimeoutMs, FETCH_TIMEOUT_MS * 3), // cap at 45s
+    signal: options?.signal,
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to download media: ${response.status}`);

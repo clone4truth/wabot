@@ -23,6 +23,6 @@ export class VideoGenerator implements StickerGenerator {
   async process(input: GeneratorInput): Promise<ProcessingResult> {
     const mediaUrl = input.mediaUrl ?? (input.content?.mediaUrl as string);
     const timeoutMs = input.timeoutMs ?? env.videoProcessingTimeoutMs;
-    return this.processor.process(mediaUrl, timeoutMs);
+    return this.processor.process(mediaUrl, timeoutMs, input.signal);
   }
 }

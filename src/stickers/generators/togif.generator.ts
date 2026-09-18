@@ -27,7 +27,7 @@ export class ToGifGenerator implements StickerGenerator {
   async process(input: GeneratorInput): Promise<ProcessingResult> {
     const url = input.mediaUrl ?? (input.content?.mediaUrl as string);
     const timeoutMs = input.timeoutMs ?? env.videoProcessingTimeoutMs;
-    const { filePath } = await downloadMedia(url);
+    const { filePath } = await downloadMedia(url, { timeoutMs, signal: input.signal });
 
     try {
       const stickerBuffer = await fs.promises.readFile(filePath);
@@ -46,7 +46,7 @@ export class ToGifGenerator implements StickerGenerator {
         );
       }
 
-      return await this.processor.process(stickerBuffer, timeoutMs);
+      return await this.processor.process(stickerBuffer, timeoutMs, input.signal);
     } finally {
       cleanupTempFile(filePath);
     }

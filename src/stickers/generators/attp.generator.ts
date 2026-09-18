@@ -28,6 +28,10 @@ export class AttpGenerator implements StickerGenerator {
   async process(input: GeneratorInput, _context: GeneratorContext): Promise<ProcessingResult> {
     const text = (input.text ?? input.content?.text ?? '') as string;
     const effect = (input.options?.effect ?? input.options?.preset ?? input.content?.effect) as string | undefined;
-    return this.processor.process(text, effect);
+    return this.processor.process(text, {
+      effect,
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+    });
   }
 }

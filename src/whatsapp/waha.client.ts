@@ -249,7 +249,11 @@ export class WAHAClient {
   // Best-effort: download gambar dari URL eksternal menggunakan SSRF-safe fetcher.
   // Mengembalikan null bila URL private/tidak valid/gagal.
   async fetchExternalImage(url: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
-    return fetchExternalImageSafe(url, { timeoutMs: 5_000, maxBytes: 2 * 1024 * 1024 });
+    return fetchExternalImageSafe(url, {
+      timeoutMs: 5_000,
+      maxBytes: env.avatarMaxBytes,
+      maxPixels: env.avatarMaxPixels,
+    });
   }
 
   /**

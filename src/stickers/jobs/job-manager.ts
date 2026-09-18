@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
+import { createDeadline } from './deadline';
 
 export type JobType = 'image' | 'video' | 'animation' | 'background';
 export type JobStatus = 'QUEUED' | 'PROCESSING' | 'DONE' | 'FAILED' | 'CANCELLED';
@@ -213,7 +214,13 @@ export class JobManager {
       job.status = 'PROCESSING';
       job.startedAt = new Date();
 
-      next.task({ remainingTimeoutMs, signal: next.signal })
+      // Buat DeadlineContext dengan sisa budget yang tersisa setelah menunggu di queue.
+      // Signal yang diteruskan ke task menggabungkan:
+      //   - Internal deadline timer (remainingTimeoutMs)
+      //   - External AbortSignal dari caller (jika ada)
+      const deadline = createDeadline(remainingTimeoutMs, next.signal);
+
+      next.task({ remainingTimeoutMs: deadline.remainingMs(), signal: deadline.signal })
         .then((result) => {
           job.status = 'DONE';
           job.finishedAt = new Date();
@@ -226,6 +233,11 @@ export class JobManager {
           next.reject(err);
         })
         .finally(() => {
+          // Slot HANYA dilepas setelah task Promise benar-benar settle.
+          // Ini memastikan concurrency accounting yang benar:
+          // meski deadline sudah lewat, activeCount tidak berkurang
+          // hingga underlying work selesai.
+          deadline.cleanup();
           this.activeCount[type]--;
           this.pump(type);
           this.pruneOldJobs();
