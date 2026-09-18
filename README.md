@@ -74,7 +74,7 @@ git push -u origin main
 
 - Node.js >= 20
 - FFmpeg
-- fontconfig + fonts (DejaVu Sans Bold)
+- fontconfig + ttf-dejavu
 - WAHA server
 
 ## Deployment
