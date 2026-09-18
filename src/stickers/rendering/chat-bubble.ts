@@ -1,4 +1,7 @@
 import Sharp from 'sharp';
+import { AppError } from '../../errors/app-error';
+import { ErrorCode } from '../../errors/error-codes';
+import { escapeXml, wrapWords } from './text-utils';
 
 // Palet warna nama ala WhatsApp.
 const NAME_COLORS = ['#ff8fab', '#ffb86b', '#ffd60a', '#7bed6f', '#4cc9f0', '#b892ff', '#ff6b6b', '#4dd0a6'];
@@ -24,35 +27,16 @@ export function senderColor(senderId: string): string {
   return NAME_COLORS[hash % NAME_COLORS.length];
 }
 
-function escapeXml(text: string): string {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-// Bungkus kata perkiraan lebar font sans (cukup untuk SVG tanpa autowrap).
+/**
+ * Bungkus kata ke baris-baris (backward-compatible wrapper mengarah ke wrapWords).
+ */
 export function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  const words = String(text ?? '').split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (lines.length >= maxLines) break;
-    if ((current + ' ' + word).trim().length <= maxChars) {
-      current = (current + ' ' + word).trim();
-    } else {
-      if (current) lines.push(current);
-      current = word.length > maxChars ? word.slice(0, maxChars - 1) + '…' : word;
-    }
-  }
-  if (current && lines.length < maxLines) lines.push(current);
-  return lines.length > 0 ? lines : [''];
+  return wrapWords(text, maxChars, maxLines);
 }
 
 export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Promise<Buffer> {
   const { senderName, senderId, quoted, avatar } = options;
-  const text = String(options.text ?? '');
+  const text = String(options.text ?? '').trim();
   const time = options.time || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
   const W = 512;
@@ -70,27 +54,62 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const nameSize = 30;
   const quoteNameSize = 24;
   const quoteBodySize = 24;
-  const textSize = 34;
   const timeSize = 22;
+
+  const lh = (s: number) => Math.round(s * 1.35);
 
   const nameColor = senderColor(senderId || senderName);
   const quotedColor = senderColor(quoted?.senderId || quoted?.senderName || '?');
-  const quotedLines = quoted ? wrapText(quoted.body.slice(0, 140), Math.floor(innerW / (quoteBodySize * 0.62)) - 4, 2) : [];
-  const textLines = wrapText(text, Math.floor(innerW / (textSize * 0.62)), 10);
 
-  const lh = (s: number) => Math.round(s * 1.35);
+  // Preview kutipan: sengaja dibatasi maksimal 140 karakter Unicode untuk ringkasan UI chat WhatsApp.
+  const quotedRaw = quoted ? Array.from(quoted.body).slice(0, 140).join('') : '';
+  const quotedSuffix = quoted && Array.from(quoted.body).length > 140 ? '...' : '';
+  const quotedPreview = quoted ? `${quotedRaw}${quotedSuffix}` : '';
+  const quotedLines = quoted ? wrapWords(quotedPreview, Math.max(4, Math.floor(innerW / (quoteBodySize * 0.62)) - 4), 2) : [];
+
+  // Hitung tinggi komponen tetap sebelum teks utama
+  const nameH = lh(nameSize) + 8;
+  const quoteH = quoted ? (14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14 + 12) : 0;
+  const timeH = 4 + lh(timeSize);
+  const fixedH = pad + 8 + nameH + quoteH + timeH + pad;
+
+  // Batas maksimum tinggi bubble agar muat di canvas 512x512 dengan margin atas/bawah minimal 14px
+  const maxBubbleH = W - 28; // 484px
+  const maxAvailableTextH = maxBubbleH - fixedH;
+
+  // Adaptive font layout fitting: coba font 34 turun hingga 18
+  let chosenTextSize = 18;
+  let chosenTextLines: string[] = [];
+  let foundFit = false;
+
+  for (let size = 34; size >= 18; size -= 2) {
+    const maxChars = Math.max(4, Math.floor(innerW / (size * 0.62)));
+    const lines = wrapWords(text, maxChars);
+    const textH = lines.length * lh(size);
+    if (textH <= maxAvailableTextH) {
+      chosenTextSize = size;
+      chosenTextLines = lines;
+      foundFit = true;
+      break;
+    }
+  }
+
+  if (!foundFit) {
+    throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks terlalu panjang untuk dimuat ke dalam bubble');
+  }
+
   let y = pad + 8;
   const parts: string[] = [];
 
   // Nama pengirim
   parts.push(`<text x="${contentX}" y="${y + nameSize}" font-family="sans-serif" font-size="${nameSize}" font-weight="bold" fill="${nameColor}">${escapeXml(senderName)}</text>`);
-  y += lh(nameSize) + 8;
+  y += nameH;
 
   // Blok quote (balasan)
   if (quoted) {
-    const quoteH = 14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14;
-    parts.push(`<rect x="${contentX - 10}" y="${y}" width="${innerW + 20}" height="${quoteH}" rx="12" fill="#ffffff" opacity="0.07"/>`);
-    parts.push(`<rect x="${contentX - 10}" y="${y}" width="7" height="${quoteH}" rx="3.5" fill="${quotedColor}"/>`);
+    const qBoxH = 14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14;
+    parts.push(`<rect x="${contentX - 10}" y="${y}" width="${innerW + 20}" height="${qBoxH}" rx="12" fill="#ffffff" opacity="0.07"/>`);
+    parts.push(`<rect x="${contentX - 10}" y="${y}" width="7" height="${qBoxH}" rx="3.5" fill="${quotedColor}"/>`);
     let qy = y + 14;
     parts.push(`<text x="${contentX + 12}" y="${qy + quoteNameSize}" font-family="sans-serif" font-size="${quoteNameSize}" font-weight="bold" fill="${quotedColor}">${escapeXml(quoted.senderName)}</text>`);
     qy += lh(quoteNameSize);
@@ -98,13 +117,13 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
       parts.push(`<text x="${contentX + 12}" y="${qy + quoteBodySize}" font-family="sans-serif" font-size="${quoteBodySize}" fill="#cfd4d9">${escapeXml(line)}</text>`);
       qy += lh(quoteBodySize);
     }
-    y += quoteH + 12;
+    y += qBoxH + 12;
   }
 
-  // Teks utama
-  for (const line of textLines) {
-    parts.push(`<text x="${contentX}" y="${y + textSize}" font-family="sans-serif" font-size="${textSize}" fill="#ffffff">${escapeXml(line)}</text>`);
-    y += lh(textSize);
+  // Teks utama adaptif tanpa silent truncation
+  for (const line of chosenTextLines) {
+    parts.push(`<text x="${contentX}" y="${y + chosenTextSize}" font-family="sans-serif" font-size="${chosenTextSize}" fill="#ffffff">${escapeXml(line)}</text>`);
+    y += lh(chosenTextSize);
   }
 
   // Jam
@@ -115,7 +134,7 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const bubbleH = y + pad;
   const bubbleY = Math.max(14, Math.round((W - bubbleH) / 2));
 
-  // Avatar lingkaran di kiri atas bubble.
+  // Avatar lingkaran di kiri atas bubble
   let defs = '';
   let avatarEl = '';
   if (avatar) {

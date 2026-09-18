@@ -173,6 +173,7 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
       expect(meta.format.toLowerCase()).toContain('mp4');
       expect(meta.codec).toBe('h264');
       expect(meta.pixelFormat).toBe('yuv420p');
+      expect(meta.duration).toBeGreaterThan(0);
       expect(meta.width).toBeGreaterThan(0);
       expect(meta.width).toBeLessThanOrEqual(512);
       expect(meta.height).toBeGreaterThan(0);
@@ -188,4 +189,25 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
       code: ErrorCode.UNSUPPORTED_STICKER_TYPE,
     });
   }, 120000);
+
+  it('!toimg & !togif: corrupt buffer -> MEDIA_DECODE_FAILED', async () => {
+    const corruptBuffer = Buffer.from('bukan-webp-dan-corrupt-data');
+    await expect(new ToImageProcessor().process(corruptBuffer)).rejects.toMatchObject({
+      code: ErrorCode.MEDIA_DECODE_FAILED,
+    });
+    await expect(new ToGifProcessor().process(corruptBuffer)).rejects.toMatchObject({
+      code: ErrorCode.MEDIA_DECODE_FAILED,
+    });
+  });
+
+  it('!toimg & !togif: reject non-WebP buffer format', async () => {
+    const jpegBuffer = await Sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 10, g: 20, b: 30 } } }).jpeg().toBuffer();
+    await expect(new ToImageProcessor().process(jpegBuffer)).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_STICKER_TYPE,
+    });
+    await expect(new ToGifProcessor().process(jpegBuffer)).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_STICKER_TYPE,
+    });
+  });
 });
+

@@ -1,11 +1,9 @@
 import Sharp from 'sharp';
-import { renderTextToBuffer } from '../rendering/text-layout';
+import { renderFittedText } from '../rendering/text-layout';
 import { StickerResult } from '../result';
-import env from '../../config/env';
-import { AppError } from '../../errors/app-error';
-import { ErrorCode } from '../../errors/error-codes';
+import { escapeXml, validateText } from '../rendering/text-utils';
 
-// Text-to-Picture: teks besar di atas background gradien.
+// Text-to-Picture: teks besar di atas background gradien deterministik.
 const PALETTES: [string, string][] = [
   ['#8338ec', '#3a86ff'],
   ['#ff006e', '#8338ec'],
@@ -15,26 +13,15 @@ const PALETTES: [string, string][] = [
   ['#22223b', '#4a4e69'],
 ];
 
-function escapeXml(text: string): string {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 export class TtpProcessor {
   async process(text: string): Promise<StickerResult> {
-    const clean = String(text ?? '').trim();
-    if (!clean) {
-      throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Teks !ttp tidak boleh kosong');
-    }
-    if (clean.length > env.maxTextLength) {
-      throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks maksimal ${env.maxTextLength} karakter`);
-    }
+    const clean = validateText(text, { emptyMessage: 'Teks !ttp tidak boleh kosong' });
 
     let hash = 0;
-    for (let i = 0; i < clean.length; i++) hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+    const chars = Array.from(clean);
+    for (let i = 0; i < chars.length; i++) {
+      hash = (hash * 31 + (chars[i].codePointAt(0) ?? 0)) >>> 0;
+    }
     const [from, to] = PALETTES[hash % PALETTES.length];
 
     const bg = Buffer.from(
@@ -47,12 +34,16 @@ export class TtpProcessor {
       `</svg>`,
     );
 
-    const overlay = await renderTextToBuffer({
+    const { buffer: overlay } = await renderFittedText({
       text: clean,
       maxWidth: 440,
       maxHeight: 400,
-      fontSize: 56,
+      maxFontSize: 64,
+      minFontSize: 18,
+      margin: 16,
       color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 2,
     });
 
     const webpBuffer = await Sharp(bg)
@@ -60,11 +51,13 @@ export class TtpProcessor {
       .webp({ quality: 90 })
       .toBuffer();
 
+    const meta = await Sharp(webpBuffer).metadata();
+
     return {
       buffer: webpBuffer,
       mimetype: 'image/webp',
-      width: 512,
-      height: 512,
+      width: meta.width || 512,
+      height: meta.height || 512,
       animated: false,
       size: webpBuffer.length,
     };

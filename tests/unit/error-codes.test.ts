@@ -45,4 +45,15 @@ describe('userMessageForError (dinamis dari env)', () => {
     const { userMessageForError } = await import('../../src/errors/error-codes');
     expect(userMessageForError({ code: ErrorCode.MEDIA_TOO_LARGE })).toBe('❌ Ukuran media terlalu besar.');
   });
+
+  it('menggunakan err.userMessage jika disediakan', async () => {
+    const { userMessageForError, ErrorCode } = await import('../../src/errors/error-codes');
+    expect(
+      userMessageForError({
+        code: ErrorCode.MODIFIER_REQUIRES_IMAGE,
+        userMessage: '❌ Mode meme membutuhkan foto.',
+      }),
+    ).toBe('❌ Mode meme membutuhkan foto.');
+  });
 });
+

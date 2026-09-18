@@ -26,7 +26,7 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
   let remainingArgs = argsStr;
 
   const firstPart = parts[0]?.toLowerCase();
-  if (RESERVED_MODIFIERS.includes(firstPart || '')) {
+  if (commandName === 'stiker' && RESERVED_MODIFIERS.includes(firstPart || '')) {
     modifier = firstPart;
     remainingArgs = parts.slice(1).join(' ');
   }

@@ -161,8 +161,30 @@ export class StickerService {
         const { filePath } = await downloadMedia(url);
         try {
           const stickerBuffer = await fs.promises.readFile(filePath);
+          let meta: Sharp.Metadata;
+          try {
+            meta = await Sharp(stickerBuffer).metadata();
+          } catch {
+            throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
+          }
+
+          if (meta.format !== 'webp') {
+            if (input.type === 'toimg') {
+              throw new AppError(
+                ErrorCode.UNSUPPORTED_STICKER_TYPE,
+                'Reply sticker static lalu gunakan !toimg',
+                { userMessage: '❌ Reply sticker static lalu gunakan !toimg.' },
+              );
+            } else {
+              throw new AppError(
+                ErrorCode.UNSUPPORTED_STICKER_TYPE,
+                'Reply sticker animasi lalu gunakan !togif',
+                { userMessage: '❌ Reply sticker animasi lalu gunakan !togif.' },
+              );
+            }
+          }
+
           if (input.type === 'toimg') {
-            const meta = await Sharp(stickerBuffer).metadata();
             const isAnimated = (meta.pages ?? 1) > 1;
             return this.processors.toimg.process(stickerBuffer, isAnimated);
           }

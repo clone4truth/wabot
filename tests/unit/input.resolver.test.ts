@@ -138,4 +138,115 @@ describe('InputResolver', () => {
     expect(resolver.resolve({ command: '!stiker', args: '' })?.type ?? null).toBe(null);
     expect(resolver.resolve({ command: '!ping', args: '' })).toBe(null);
   });
+
+  describe('P0: Modifier / Input Compatibility Matrix & Force Text', () => {
+    it('reply image + !stiker teks hello -> text', () => {
+      const res = resolver.resolve({
+        command: '!stiker',
+        args: 'hello',
+        modifier: 'teks',
+        reply: { media: { url: 'http://x/img.jpg', mimetype: 'image/jpeg' } },
+        senderName: 'Budi',
+      });
+      expect(res?.type).toBe('text');
+      expect(res?.content.text).toBe('hello');
+    });
+
+    it('reply video + !stiker teks hello -> text', () => {
+      const res = resolver.resolve({
+        command: '!stiker',
+        args: 'hello',
+        modifier: 'teks',
+        reply: { media: { url: 'http://x/vid.mp4', mimetype: 'video/mp4' } },
+        senderName: 'Budi',
+      });
+      expect(res?.type).toBe('text');
+      expect(res?.content.text).toBe('hello');
+    });
+
+    it('reply image + !stiker teks tanpa args -> error Tambahkan teks', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!stiker',
+          args: '',
+          modifier: 'teks',
+          reply: { media: { url: 'http://x/img.jpg', mimetype: 'image/jpeg' } },
+        }),
+      ).toThrowError(/Tambahkan teks setelah !stiker teks/);
+    });
+
+    it('reply text + !stiker teks tanpa args -> text dari reply', () => {
+      const res = resolver.resolve({
+        command: '!stiker',
+        args: '',
+        modifier: 'teks',
+        reply: { body: 'hello dunia' },
+      });
+      expect(res?.type).toBe('text');
+      expect(res?.content.text).toBe('hello dunia');
+    });
+
+    it('reply image + !stiker quote -> error MODIFIER_REQUIRES_TEXT', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!stiker',
+          args: '',
+          modifier: 'quote',
+          reply: { media: { url: 'http://x/img.jpg', mimetype: 'image/jpeg' } },
+        }),
+      ).toThrow();
+    });
+
+    it('reply video + !stiker circle -> error MODIFIER_REQUIRES_IMAGE', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!stiker',
+          args: '',
+          modifier: 'circle',
+          reply: { media: { url: 'http://x/vid.mp4', mimetype: 'video/mp4' } },
+        }),
+      ).toThrow();
+    });
+
+    it('no image + !stiker meme A | B -> error Mode meme membutuhkan foto', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!stiker',
+          args: 'A | B',
+          modifier: 'meme',
+        }),
+      ).toThrowError(/Mode meme membutuhkan foto/);
+    });
+
+    it('no image + !stiker crop hello -> error Mode crop membutuhkan foto', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!stiker',
+          args: 'hello',
+          modifier: 'crop',
+        }),
+      ).toThrowError(/Mode crop membutuhkan foto/);
+    });
+
+    it('reply non-webp pada !toimg -> error UNSUPPORTED_STICKER_TYPE', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!toimg',
+          args: '',
+          reply: { media: { url: 'http://x/pic.jpg', mimetype: 'image/jpeg' } },
+        }),
+      ).toThrow();
+    });
+
+    it('reply non-webp pada !togif -> error UNSUPPORTED_STICKER_TYPE', () => {
+      expect(() =>
+        resolver.resolve({
+          command: '!togif',
+          args: '',
+          reply: { media: { url: 'http://x/vid.mp4', mimetype: 'video/mp4' } },
+        }),
+      ).toThrow();
+    });
+  });
 });
+

@@ -30,6 +30,35 @@ describe('Command Parser', () => {
     expect(result?.args).toBe('top | bottom');
   });
 
+  it('hanya parse modifier untuk !stiker, bukan untuk !ttp atau !attp', () => {
+    const stikerQuote = parseCommand('!stiker quote hello');
+    expect(stikerQuote?.modifier).toBe('quote');
+    expect(stikerQuote?.args).toBe('hello');
+
+    const ttpQuote = parseCommand('!ttp quote hello');
+    expect(ttpQuote?.name).toBe('ttp');
+    expect(ttpQuote?.modifier).toBeUndefined();
+    expect(ttpQuote?.args).toBe('quote hello');
+    expect(ttpQuote?.rawArgs).toBe('quote hello');
+
+    const attpBubble = parseCommand('!attp bubble hello');
+    expect(attpBubble?.name).toBe('attp');
+    expect(attpBubble?.modifier).toBeUndefined();
+    expect(attpBubble?.args).toBe('bubble hello');
+    expect(attpBubble?.rawArgs).toBe('bubble hello');
+
+    const ttpCrop = parseCommand('!ttp crop');
+    expect(ttpCrop?.name).toBe('ttp');
+    expect(ttpCrop?.modifier).toBeUndefined();
+    expect(ttpCrop?.args).toBe('crop');
+
+    const attpMeme = parseCommand('!attp meme');
+    expect(attpMeme?.name).toBe('attp');
+    expect(attpMeme?.modifier).toBeUndefined();
+    expect(attpMeme?.args).toBe('meme');
+  });
+
+
   it('returns null for non-command', () => {
     expect(parseCommand('hello')).toBeNull();
   });

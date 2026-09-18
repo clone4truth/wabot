@@ -45,4 +45,36 @@ describe('Chat bubble renderer', () => {
     expect(isWebp(buf)).toBe(true);
     expect(buf.length).toBeGreaterThan(1000);
   });
+
+  it('mendukung teks 300 karakter secara adaptif', async () => {
+    const text300 = 'pesan penting '.repeat(22).trim().slice(0, 300);
+    const buf = await renderChatBubbleToBuffer({
+      senderName: 'Budi',
+      senderId: '1',
+      text: text300,
+    });
+    expect(isWebp(buf)).toBe(true);
+  });
+
+  it('mendukung kata unbroken panjang 250 karakter tanpa silent truncation', async () => {
+    const unbroken = 'a'.repeat(250);
+    const buf = await renderChatBubbleToBuffer({
+      senderName: 'Budi',
+      senderId: '1',
+      text: unbroken,
+    });
+    expect(isWebp(buf)).toBe(true);
+  });
+
+  it('menolak teks yang mustahil muat dengan TEXT_TOO_LONG', async () => {
+    const hugeText = 'kata '.repeat(1000);
+    await expect(
+      renderChatBubbleToBuffer({
+        senderName: 'Budi',
+        senderId: '1',
+        text: hugeText,
+      }),
+    ).rejects.toMatchObject({ code: 'TEXT_TOO_LONG' });
+  });
 });
+

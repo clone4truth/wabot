@@ -29,13 +29,24 @@ async function fixtureJpg(): Promise<string> {
 }
 
 describe('ImageStickerProcessor circle mask', () => {
-  it('tengah terlihat, sudut transparan', async () => {
+  it('tengah terlihat, sudut transparan, dimensi 512x512', async () => {
     await fixtureJpg();
     const result = await new ImageStickerProcessor().process('http://x/a.jpg', 'circle');
     expect(result.mimetype).toBe('image/webp');
+    expect(result.width).toBe(512);
+    expect(result.height).toBe(512);
     expect(await alphaAt(result.buffer, 0.5, 0.5)).toBeGreaterThan(200);
     expect(await alphaAt(result.buffer, 0.01, 0.01)).toBe(0);
   });
+
+  it('crop: dimensi 512x512 tanpa padding transparan di tepi', async () => {
+    await fixtureJpg();
+    const result = await new ImageStickerProcessor().process('http://x/a.jpg', 'crop');
+    expect(result.width).toBe(512);
+    expect(result.height).toBe(512);
+    expect(await alphaAt(result.buffer, 0.5, 0.5)).toBeGreaterThan(200);
+  });
+
 
   it('full: dimensi 512 dan sudut transparan untuk portrait', async () => {
     const p = `/tmp/test_portrait_${Date.now()}.jpg`;

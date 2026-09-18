@@ -5,22 +5,57 @@ import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { cleanupTempFile, createTempFile } from '../../media/temp-files';
 import { getVideoMetadata, runFfmpegWithTimeout } from '../../media/ffmpeg';
-import { logger } from '../../observability/logger';
 import env from '../../config/env';
 import fs from 'fs';
 import path from 'path';
 
 export class ToGifProcessor {
   async process(stickerBuffer: Buffer, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<VideoResult> {
-    // Input wajib animated (stiker statis -> tolak dengan arahan).
-    let pages = 1;
+    let meta;
     try {
-      pages = (await Sharp(stickerBuffer).metadata()).pages ?? 1;
+      meta = await Sharp(stickerBuffer).metadata();
     } catch {
-      throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Sticker tidak dapat dibaca');
+      throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
     }
+
+    if (meta.format !== 'webp') {
+      throw new AppError(
+        ErrorCode.UNSUPPORTED_STICKER_TYPE,
+        'Reply sticker animasi lalu gunakan !togif',
+        { userMessage: '❌ Reply sticker animasi lalu gunakan !togif.' },
+      );
+    }
+
+    const pages = meta.pages ?? 1;
     if (pages <= 1) {
-      throw new AppError(ErrorCode.UNSUPPORTED_STICKER_TYPE, 'Static sticker tidak bisa dikonversi ke GIF');
+      throw new AppError(
+        ErrorCode.UNSUPPORTED_STICKER_TYPE,
+        'Sticker static. Gunakan !toimg',
+        { userMessage: '❌ Sticker static. Gunakan !toimg.' },
+      );
+    }
+
+    // Hitung timing / FPS berdasarkan metadata.delay jika tersedia dari WebP
+    let fps = 10;
+    if (Array.isArray(meta.delay) && meta.delay.length > 0) {
+      const avgDelay = meta.delay.reduce((a, b) => a + b, 0) / meta.delay.length;
+      if (avgDelay > 0) {
+        fps = Math.max(1, Math.min(30, Math.round(1000 / avgDelay)));
+      }
+    }
+
+    // Sampling frame secara merata bila pages > 30 (bukan membuang sisa frame)
+    const MAX_FRAMES = 30;
+    let frameIndices: number[] = [];
+    if (pages <= MAX_FRAMES) {
+      frameIndices = Array.from({ length: pages }, (_, i) => i);
+    } else {
+      frameIndices = Array.from({ length: MAX_FRAMES }, (_, k) =>
+        Math.min(pages - 1, Math.round((k * (pages - 1)) / (MAX_FRAMES - 1))),
+      );
+      // Sesuaikan fps agar total durasi asli tetap terwakili
+      const samplingRatio = MAX_FRAMES / pages;
+      fps = Math.max(1, Math.min(30, Math.round(fps * samplingRatio)));
     }
 
     const workdir = path.join(env.tempDir, `togif-${randomUUID()}`);
@@ -28,18 +63,17 @@ export class ToGifProcessor {
     const outputPath = createTempFile('.mp4');
 
     try {
-      // Ekstrak frame via Sharp (decoder webp ffmpeg tidak stabil) lalu encode.
-      const count = Math.min(pages, 30);
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < frameIndices.length; i++) {
+        const frameIdx = frameIndices[i];
         const framePath = path.join(workdir, `${i}.png`);
-        const png = await Sharp(stickerBuffer, { page: i }).png().toBuffer();
+        const png = await Sharp(stickerBuffer, { page: frameIdx }).png().toBuffer();
         await fs.promises.writeFile(framePath, png);
       }
 
       await runFfmpegWithTimeout([
         '-y',
         '-loglevel', 'error',
-        '-framerate', '10',
+        '-framerate', String(fps),
         '-i', path.join(workdir, '%d.png'),
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
@@ -48,12 +82,13 @@ export class ToGifProcessor {
         outputPath,
       ], timeoutMs);
 
-      const meta = await getVideoMetadata(outputPath);
+      const outMeta = await getVideoMetadata(outputPath);
       if (
-        !meta.format.toLowerCase().includes('mp4') ||
-        meta.codec !== 'h264' ||
-        meta.width <= 0 || meta.width > 512 ||
-        meta.height <= 0 || meta.height > 512
+        !outMeta.format.toLowerCase().includes('mp4') ||
+        outMeta.codec !== 'h264' ||
+        outMeta.width <= 0 || outMeta.width > 512 ||
+        outMeta.height <= 0 || outMeta.height > 512 ||
+        outMeta.duration <= 0
       ) {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Output MP4 tidak valid');
       }
@@ -68,17 +103,16 @@ export class ToGifProcessor {
       return {
         buffer: mp4Buffer,
         mimetype: 'video/mp4',
-        width: meta.width,
-        height: meta.height,
+        width: outMeta.width,
+        height: outMeta.height,
         animated: true,
         size: mp4Buffer.length,
       };
     } finally {
-      // Hapus seluruh workspace (frames + output bila gagal).
       try {
         fs.rmSync(workdir, { recursive: true, force: true });
       } catch {
-        // best-effort
+        // best-effort cleanup
       }
       cleanupTempFile(outputPath);
     }

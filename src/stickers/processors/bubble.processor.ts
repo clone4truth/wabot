@@ -2,8 +2,7 @@ import Sharp from 'sharp';
 import { renderChatBubbleToBuffer, QuotedMessage } from '../rendering/chat-bubble';
 import { StickerResult } from '../result';
 import env from '../../config/env';
-import { AppError } from '../../errors/app-error';
-import { ErrorCode } from '../../errors/error-codes';
+import { validateText } from '../rendering/text-utils';
 
 export class BubbleProcessor {
   async process(
@@ -13,14 +12,15 @@ export class BubbleProcessor {
     quoted?: QuotedMessage,
     avatar?: { buffer: Buffer; mimetype: string } | null,
   ): Promise<StickerResult> {
-    if (Array.from(text).length > env.maxTextLength) {
-      throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks maksimal ${env.maxTextLength} karakter`);
-    }
+    const clean = validateText(text, {
+      maxLength: env.maxTextLength,
+      emptyMessage: 'Teks bubble tidak boleh kosong',
+    });
 
     const bubble = await renderChatBubbleToBuffer({
       senderName: senderName || '?',
       senderId: senderId || senderName || '?',
-      text,
+      text: clean,
       quoted,
       avatar,
     });

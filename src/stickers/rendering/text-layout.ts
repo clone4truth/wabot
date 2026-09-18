@@ -1,7 +1,7 @@
 import { getDefaultFontPath, getFontFamily } from './fonts';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { wrapText } from './chat-bubble';
+import { escapeXml, wrapWords } from './text-utils';
 import Sharp from 'sharp';
 
 export interface TextLayoutOptions {
@@ -17,23 +17,15 @@ export interface TextLayoutOptions {
 }
 
 // Escape karakter khusus XML agar teks user tidak merusak markup Pango
-// (mis. "&", "<", ">" pada "!stiker a & b" atau "<3").
 export function escapePangoMarkup(text: string): string {
   return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
 
 export interface FittedTextOptions extends TextLayoutOptions {
   minFontSize?: number;
   maxFontSize?: number;
   margin?: number;
-}
-
-function escapeXml(text: string): string {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 async function renderSingleLine(
@@ -45,20 +37,22 @@ async function renderSingleLine(
   align: 'left' | 'center' | 'right',
   outlineColor: string,
   outlineWidth: number,
+  margin: number = 16,
 ): Promise<Buffer> {
-  // Render via SVG: ukuran font presisi dalam px (Pango/sharp me-render
-  // font_desc raksasa yang tak terprediksi). Outline via paint-order stroke.
   const family = getFontFamily(getDefaultFontPath());
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
-  const ax = align === 'left' ? 0 : align === 'right' ? maxWidth : maxWidth / 2;
-  const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.62)));
-  const lines = wrapText(text, maxChars, 20);
+  const ax = align === 'left' ? margin : align === 'right' ? maxWidth - margin : maxWidth / 2;
+  const safeWidth = Math.max(20, maxWidth - margin * 2);
+  const maxChars = Math.max(4, Math.floor(safeWidth / (fontSize * 0.65)));
+  // Bungkus tanpa silent truncation
+  const lines = wrapWords(text, maxChars);
   const lh = Math.round(fontSize * 1.25);
   const totalH = lines.length * lh;
   const startY = Math.max(0, Math.round((maxHeight - totalH) / 2));
   const stroke = outlineWidth > 0 && outlineColor !== 'transparent'
     ? ` stroke="${outlineColor}" stroke-width="${Math.round(outlineWidth * 2)}" paint-order="stroke"`
     : '';
+
 
   const texts = lines
     .map((line, i) => {
@@ -85,10 +79,10 @@ export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Bu
     outlineColor = '#000000',
     outlineWidth = 2,
     align = 'center',
-  } = options;
+    margin = 16,
+  } = options as any;
 
-  // Outline di-render langsung oleh SVG (paint-order stroke).
-  return renderSingleLine(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth);
+  return renderSingleLine(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth, margin);
 }
 
 export interface FittedTextResult {
@@ -110,9 +104,9 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
   const safeH = maxHeight - margin * 2;
 
   let lastError: unknown = null;
-  for (let size = maxFontSize; size >= minFontSize; size -= 8) {
+  for (let size = maxFontSize; size >= minFontSize; size -= 4) {
     try {
-      const buffer = await renderTextToBuffer({ ...options, fontSize: size });
+      const buffer = await renderTextToBuffer({ ...options, fontSize: size, margin } as any);
       const { info } = await Sharp(buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
       if (info.width <= safeW && info.height <= safeH) {
         return { buffer, fontSize: size };
@@ -122,6 +116,7 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
       lastError = err;
     }
   }
+
   throw new AppError(
     ErrorCode.TEXT_TOO_LONG,
     `Teks tidak muat dijadikan stiker: ${String((lastError as Error)?.message || lastError)}`,

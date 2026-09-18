@@ -65,7 +65,17 @@ describe('Adaptive fitted layout (ukur render aktual)', () => {
       renderFittedText({ text: 'kata '.repeat(2000).trim(), maxWidth: 512, maxHeight: 512, minFontSize: 40 }),
     ).rejects.toMatchObject({ code: ErrorCode.TEXT_TOO_LONG });
   }, 120000);
+
+  it('unbroken 250 karakter render success tanpa kehilangan karakter', async () => {
+    const text250 = 'a'.repeat(250);
+    const fitted = await renderFittedText({ text: text250, maxWidth: 512, maxHeight: 512, minFontSize: 16 });
+    expect(fitted.buffer.length).toBeGreaterThan(1000);
+    const { info } = await Sharp(fitted.buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+    expect(info.width).toBeLessThanOrEqual(512 - 32);
+    expect(info.height).toBeLessThanOrEqual(512 - 32);
+  }, 120000);
 });
+
 
 describe('Unicode + emoji', () => {
   it('render tanpa crash (fallback font environment)', async () => {

@@ -30,11 +30,10 @@ export class ImageStickerProcessor {
           });
           break;
         case 'circle': {
-          const squareSize = Math.min(metadata.width || 512, metadata.height || 512, 512);
+          const squareSize = 512;
           outWidth = squareSize;
           outHeight = squareSize;
-          // Mask lingkaran putih via SVG: dest-in memakai alpha mask,
-          // bukan source transparan (yang menghasilkan output kosong).
+          // Mask lingkaran putih via SVG 512x512: dest-in memakai alpha mask
           const circleMask = Buffer.from(
             `<svg xmlns="http://www.w3.org/2000/svg" width="${squareSize}" height="${squareSize}">` +
             `<circle cx="${squareSize / 2}" cy="${squareSize / 2}" r="${squareSize / 2}" fill="white"/>` +
@@ -53,12 +52,13 @@ export class ImageStickerProcessor {
       }
 
       const webpBuffer = await sharpInstance.webp({ quality: 90 }).toBuffer();
+      const meta = await Sharp(webpBuffer).metadata();
 
       return {
         buffer: webpBuffer,
         mimetype: 'image/webp',
-        width: outWidth,
-        height: outHeight,
+        width: meta.width || outWidth,
+        height: meta.height || outHeight,
         animated: false,
         size: webpBuffer.length,
       };

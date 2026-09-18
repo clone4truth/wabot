@@ -1,7 +1,8 @@
 import env from '../config/env';
 
 export enum ErrorCode {
-  INVALID_COMMAND = 'INVALID_COMMAND',  UNSUPPORTED_INPUT = 'UNSUPPORTED_INPUT',
+  INVALID_COMMAND = 'INVALID_COMMAND',
+  UNSUPPORTED_INPUT = 'UNSUPPORTED_INPUT',
   TEXT_TOO_LONG = 'TEXT_TOO_LONG',
   MEDIA_TOO_LARGE = 'MEDIA_TOO_LARGE',
   VIDEO_TOO_LONG = 'VIDEO_TOO_LONG',
@@ -15,6 +16,9 @@ export enum ErrorCode {
   MEDIA_NOT_AVAILABLE = 'MEDIA_NOT_AVAILABLE',
   UNSUPPORTED_STICKER_TYPE = 'UNSUPPORTED_STICKER_TYPE',
   TEMP_FILE_CLEANUP_FAILED = 'TEMP_FILE_CLEANUP_FAILED',
+  INVALID_MODIFIER_INPUT = 'INVALID_MODIFIER_INPUT',
+  MODIFIER_REQUIRES_IMAGE = 'MODIFIER_REQUIRES_IMAGE',
+  MODIFIER_REQUIRES_TEXT = 'MODIFIER_REQUIRES_TEXT',
 }
 
 export const userMessages: Record<ErrorCode, string> = {
@@ -33,11 +37,20 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.MEDIA_NOT_AVAILABLE]: '❌ Media dari pesan yang direply tidak tersedia.',
   [ErrorCode.UNSUPPORTED_STICKER_TYPE]: '❌ Tipe sticker tidak didukung. Animated → !togif, static → !toimg.',
   [ErrorCode.TEMP_FILE_CLEANUP_FAILED]: '⚠️ Gagal membersihkan file sementara.',
+  [ErrorCode.INVALID_MODIFIER_INPUT]: '❌ Modifier tidak didukung untuk input ini.',
+  [ErrorCode.MODIFIER_REQUIRES_IMAGE]: '❌ Mode ini membutuhkan foto.',
+  [ErrorCode.MODIFIER_REQUIRES_TEXT]: '❌ Mode ini membutuhkan teks.',
 };
 
 // Pesan user dinamis: limit configurable tercermin di respons (bukan hardcode).
-// Tidak memakai raw internal message agar tak bocor ke user.
-export function userMessageForError(err: { code: ErrorCode }): string {
+// Tidak memakai raw internal message agar tak bocor ke user, kecuali userMessage eksplisit disediakan.
+export function userMessageForError(err: { code: ErrorCode; userMessage?: string; details?: Record<string, unknown> }): string {
+  if (err.userMessage) {
+    return err.userMessage;
+  }
+  if (typeof err.details?.userMessage === 'string') {
+    return err.details.userMessage;
+  }
   if (err.code === ErrorCode.TEXT_TOO_LONG) {
     return `❌ Teks maksimal ${env.maxTextLength} karakter.`;
   }
