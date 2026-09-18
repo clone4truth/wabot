@@ -97,6 +97,36 @@ export class WAHAClient {
     }
   }
 
+  // Best-effort: info chat (nama + foto) via overview. null bila gagal.
+  async getChatInfo(chatId: string): Promise<{ name?: string; picture?: string } | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(
+        `${this.baseUrl}/api/${this.session}/chats/overview?limit=1&ids=${encodeURIComponent(chatId)}`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (!res.ok) return null;
+      const data = (await res.json()) as any;
+      const chat = Array.isArray(data) ? data[0] : data?.chats?.[0];
+      if (!chat) return null;
+      return {
+        name: this.cleanName(chat.name || chat.pushName),
+        picture: chat.picture || undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private cleanName(name: unknown): string | undefined {
+    if (typeof name !== 'string') return undefined;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === '~') return undefined;
+    return trimmed.slice(0, 32);
+  }
+
   // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.
   async getProfilePicture(chatId: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
     try {
@@ -110,8 +140,19 @@ export class WAHAClient {
       if (!res.ok) return null;
       const { url } = (await res.json()) as { url?: string | null };
       if (!url) return null;
+      return this.fetchImage(url);
+    } catch {
+      return null;
+    }
+  }
 
-      const imgRes = await fetch(url);
+  // Best-effort: download gambar dari URL. null bila gagal.
+  async fetchImage(url: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const imgRes = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
       if (!imgRes.ok) return null;
       const mimetype = imgRes.headers.get('content-type') || 'image/jpeg';
       if (!mimetype.startsWith('image/')) return null;

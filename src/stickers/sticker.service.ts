@@ -58,14 +58,29 @@ export class StickerService {
 
     switch (input.type) {
       case 'text': {
+        // Resolve nama + foto via satu panggilan overview per ID unik (best-effort).
+        const ids = [...new Set([content.senderId, content.quotedSenderId].filter(Boolean))] as string[];
+        const infos = await Promise.all(ids.map((id) => this.wahaClient.getChatInfo(id).catch(() => null)));
+        const infoById = new Map(ids.map((id, i) => [id, infos[i]]));
+        const senderInfo = content.senderId ? infoById.get(content.senderId) : undefined;
+        const quotedInfo = content.quotedSenderId ? infoById.get(content.quotedSenderId) : undefined;
+
+        const senderName = senderInfo?.name || content.senderName;
         const quoted = content.quotedBody
-          ? { senderName: content.quotedSenderName || '?', senderId: content.quotedSenderId, body: content.quotedBody }
+          ? {
+              senderName: quotedInfo?.name || content.quotedSenderName || '?',
+              senderId: content.quotedSenderId,
+              body: content.quotedBody,
+            }
           : undefined;
-        // Avatar best-effort: tanpa foto profil bubble tetap dirender.
-        const avatar = content.senderId
-          ? await this.wahaClient.getProfilePicture(content.senderId).catch(() => null)
+
+        let avatar = senderInfo?.picture
+          ? await this.wahaClient.fetchImage(senderInfo.picture).catch(() => null)
           : null;
-        return this.processors.text.process(content.text ?? '', content.senderName, content.senderId, quoted, avatar);
+        if (!avatar && content.senderId) {
+          avatar = await this.wahaClient.getProfilePicture(content.senderId).catch(() => null);
+        }
+        return this.processors.text.process(content.text ?? '', senderName, content.senderId, quoted, avatar);
       }
       case 'image': {
         if (!content.mediaUrl) {
