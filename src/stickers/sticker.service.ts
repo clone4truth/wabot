@@ -1,6 +1,12 @@
 import { StickerResult } from './result';
 import { BubbleProcessor } from './processors/bubble.processor';
+import { TextStickerProcessor } from './processors/text.processor';
+import { QuoteProcessor } from './processors/quote.processor';
+import { MemeProcessor } from './processors/meme.processor';
+import { TtpProcessor } from './processors/ttp.processor';
 import { ImageStickerProcessor } from './processors/image.processor';
+import { addStickerExif } from './exif';
+import { logger } from '../observability/logger';
 import { VideoStickerProcessor } from './processors/video.processor';
 import { ToImageProcessor } from './processors/toimg.processor';
 import { ToGifProcessor } from './processors/togif.processor';
@@ -18,6 +24,10 @@ export class StickerService {
   private wahaClient = new WAHAClient();
   private processors = {
     text: new BubbleProcessor(),
+    plainText: new TextStickerProcessor(),
+    quote: new QuoteProcessor(),
+    meme: new MemeProcessor(),
+    ttp: new TtpProcessor(),
     image: new ImageStickerProcessor(),
     video: new VideoStickerProcessor(),
     toimg: new ToImageProcessor(),
@@ -43,14 +53,33 @@ export class StickerService {
     }
 
     const timeoutMs = this.getTimeout(input.type);
-    const result = await Promise.race([
+    const raw = await Promise.race([
       this.runProcessor(input),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs)
       ),
     ]);
 
-    return result;
+    return this.withPackMeta(raw, input.type);
+  }
+
+  // Metadata pack WhatsApp (nama pack + emoji) untuk webp statis.
+  private async withPackMeta(result: StickerResult | null, inputType: string): Promise<StickerResult | null> {
+    if (!result || result.mimetype !== 'image/webp' || result.animated) return result;
+    const emojis: Record<string, string[]> = {
+      text: ['💬'],
+      image: ['🖼️'],
+      video: ['🎬'],
+      meme: ['😂'],
+      ttp: ['🎨'],
+    };
+    try {
+      const buffer = await addStickerExif(result.buffer, { emojis: emojis[inputType] || ['🤖'] });
+      return { ...result, buffer, size: buffer.length };
+    } catch (err) {
+      logger.warn('Gagal menempel EXIF pack, kirim tanpa metadata', { error: String(err) });
+      return result;
+    }
   }
 
   // Ekstrak argumen primitif dari ResolvedInput sesuai signature tiap prosesor.
@@ -59,6 +88,13 @@ export class StickerService {
 
     switch (input.type) {
       case 'text': {
+        const text = content.text ?? '';
+        if (input.modifier === 'quote') {
+          return this.processors.quote.process(text, content.senderName);
+        }
+        if (input.modifier === 'teks') {
+          return this.processors.plainText.process(text);
+        }
         // Resolve nama tersimpan + info chat per ID unik (best-effort, paralel).
         // Prioritas nama: kontak tersimpan > overview > pushName payload > ID.
         const ids = [...new Set([content.senderId, content.quotedSenderId].filter(Boolean))] as string[];
@@ -98,6 +134,15 @@ export class StickerService {
         }
         return this.processors.image.process(content.mediaUrl, input.modifier ?? 'full');
       }
+      case 'meme': {
+        if (!content.mediaUrl) {
+          throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
+        }
+        return this.processors.meme.process(content.mediaUrl, content.args ?? '');
+      }
+      case 'ttp': {
+        return this.processors.ttp.process(content.text ?? '');
+      }
       case 'video': {
         if (!content.mediaUrl) {
           throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
@@ -131,6 +176,8 @@ export class StickerService {
       video: env.videoProcessingTimeoutMs,
       toimg: env.imageProcessingTimeoutMs,
       togif: env.videoProcessingTimeoutMs,
+      meme: env.imageProcessingTimeoutMs,
+      ttp: env.textProcessingTimeoutMs,
     };
     return timeouts[inputType] || env.textProcessingTimeoutMs;
   }

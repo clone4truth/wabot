@@ -15,6 +15,12 @@ vi.mock('../../src/whatsapp/waha.client', () => ({
   })),
 }));
 
+const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
+vi.mock('../../src/media/downloader', () => ({
+  downloadMedia: dlMock.downloadMedia,
+  resolveMediaUrl: (u: string) => u,
+}));
+
 describe('StickerService dispatcher', () => {
   let service: StickerService;
 
@@ -54,5 +60,32 @@ describe('StickerService dispatcher', () => {
     await expect(
       service.process({ command: '!stiker', args: 'x'.repeat(301), ...base }),
     ).rejects.toMatchObject({ code: ErrorCode.TEXT_TOO_LONG });
+  });
+
+  it('!ttp -> webp gradien ber-EXIF', async () => {
+    const result = await service.process({ command: '!ttp', args: 'halo dunia', ...base });
+    expect(result?.mimetype).toBe('image/webp');
+    expect(result!.buffer.slice(0, 4).toString()).toBe('RIFF');
+    expect(result!.buffer.toString('binary')).toContain('sticker-pack-id');
+  });
+
+  it('modifier quote -> gaya kutipan', async () => {
+    const result = await service.process({ command: '!stiker', args: 'kata bijak', modifier: 'quote', ...base });
+    expect(result?.mimetype).toBe('image/webp');
+  });
+
+  it('modifier meme + foto -> meme atas|bawah', async () => {
+    const Sharp = (await import('sharp')).default;
+    const fs = (await import('fs')).default;
+    const jpgPath = '/tmp/test_meme_src.jpg';
+    const jpg = await Sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 30, g: 60, b: 200 } } }).jpeg().toBuffer();
+    fs.writeFileSync(jpgPath, jpg);
+    dlMock.downloadMedia.mockResolvedValue({ filePath: jpgPath, mimeType: 'image/jpeg', size: jpg.length });
+    const result = await service.process({
+      command: '!stiker', args: 'ATAS | BAWAH', modifier: 'meme',
+      reply: { media: { url: 'http://x/a.jpg', mimetype: 'image/jpeg' } }, ...base,
+    });
+    expect(result?.mimetype).toBe('image/webp');
+    if (fs.existsSync(jpgPath)) fs.unlinkSync(jpgPath);
   });
 });

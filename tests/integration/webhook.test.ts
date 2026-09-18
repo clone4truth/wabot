@@ -121,6 +121,15 @@ describe('Webhook end-to-end', () => {
     expect(buf.slice(0, 4).toString()).toBe('RIFF');
   }, 30000);
 
+  it('!ttp hello -> stiker gradien ber-EXIF', async () => {
+    const res = await postWebhook(rawMessage('!ttp hello'));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
+    const buf: Buffer = wahaMocks.sendSticker.mock.calls[0][1];
+    expect(buf.slice(0, 4).toString()).toBe('RIFF');
+    expect(buf.toString('binary')).toContain('sticker-pack-id');
+  }, 30000);
+
   it('spam cepat dari satu user -> rate_limited tanpa retry storm', async () => {
     const from = uid('spammer') + '@c.us';
     const results: { status: number; body: string }[] = [];

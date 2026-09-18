@@ -2,7 +2,7 @@ import env from '../config/env';
 import { NormalizedMessage } from '../whatsapp/types';
 
 export interface ResolvedInput {
-  type: 'text' | 'image' | 'video' | 'toimg' | 'togif';
+  type: 'text' | 'image' | 'video' | 'toimg' | 'togif' | 'ttp' | 'meme';
   source: 'reply' | 'media' | 'direct';
   content: {
     text?: string;
@@ -48,13 +48,23 @@ export class InputResolver {
       return { type: 'togif', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
     }
 
-    if (commandName !== 'stiker') return null;
+    if (commandName !== 'stiker' && commandName !== 'ttp') return null;
+
+    // Text-to-Picture: !ttp <teks> (atau reply teks).
+    if (commandName === 'ttp') {
+      const ttpText = args || reply?.body || '';
+      if (!ttpText) return null;
+      return { type: 'ttp', source: args ? 'direct' : 'reply', content: { text: ttpText, args } };
+    }
 
     // Priority 1: Replied message
     if (reply) {
       if (reply.media?.url) {
         if (reply.media.mimetype?.startsWith('video')) {
           return { type: 'video', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args } };
+        }
+        if (modifier === 'meme') {
+          return { type: 'meme', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args } };
         }
         return { type: 'image', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args }, modifier: imageModifier };
       }
@@ -63,7 +73,7 @@ export class InputResolver {
       const quotedBody = reply.body || (reply.media ? quotedLabel(reply.media.mimetype) : '');
       if (args) {
         return {
-          type: 'text', source: 'reply',
+          type: 'text', source: 'reply', modifier,
           content: {
             text: args, args, senderName, senderId,
             quotedSenderName: reply.senderName, quotedSenderId: reply.senderId, quotedBody,
@@ -72,7 +82,7 @@ export class InputResolver {
       }
       if (reply.body) {
         return {
-          type: 'text', source: 'reply',
+          type: 'text', source: 'reply', modifier,
           content: { text: reply.body, args, senderName: reply.senderName, senderId: reply.senderId },
         };
       }
@@ -83,12 +93,15 @@ export class InputResolver {
       if (media.mimetype?.startsWith('video')) {
         return { type: 'video', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args } };
       }
+      if (modifier === 'meme') {
+        return { type: 'meme', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args } };
+      }
       return { type: 'image', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args }, modifier: imageModifier };
     }
 
     // Priority 3: Direct text
     if (args) {
-      return { type: 'text', source: 'direct', content: { text: args, args, senderName, senderId } };
+      return { type: 'text', source: 'direct', modifier, content: { text: args, args, senderName, senderId } };
     }
 
     return null;

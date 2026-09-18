@@ -10,6 +10,7 @@ export function handleMenu(): string {
     '!stiker bubble — Stiker bubble',
     '!stiker meme <atas> | <bawah> — Stiker meme',
     '!stiker teks <teks> — Paksa mode teks',
+    '!ttp <teks> — Stiker teks warna-warni',
     '!stiker — Otomatis detect input',
     '!toimg — Konversi sticker static ke gambar',
     '!togif — Konversi animated sticker ke media',

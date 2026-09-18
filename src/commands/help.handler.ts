@@ -10,6 +10,7 @@ export function handleHelp(): string {
     'Reply foto lalu !stiker crop',
     'Reply teks lalu !stiker quote',
     '!stiker meme TEKAN | DISINI',
+    '!ttp Halo Dunia',
     '',
     '!toimg → Ubah sticker static jadi gambar',
     '!togif → Ubah animated sticker jadi video',

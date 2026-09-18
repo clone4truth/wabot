@@ -86,6 +86,25 @@ describe('InputResolver', () => {
     expect(bogus?.modifier).toBeUndefined();
   });
 
+  it('!ttp langsung dan via reply teks', () => {
+    const direct = resolver.resolve({ command: '!ttp', args: 'halo' });
+    expect(direct?.type).toBe('ttp');
+    expect(direct?.content.text).toBe('halo');
+    const viaReply = resolver.resolve({ command: '!ttp', args: '', reply: { body: 'teks reply' } });
+    expect(viaReply?.type).toBe('ttp');
+    expect(viaReply?.content.text).toBe('teks reply');
+    expect(resolver.resolve({ command: '!ttp', args: '' })).toBe(null);
+  });
+
+  it('modifier meme pada foto -> tipe meme', () => {
+    const meme = resolver.resolve({
+      command: '!stiker', args: 'A | B', modifier: 'meme',
+      reply: { media: { url: 'http://x/a.jpg', mimetype: 'image/jpeg' } },
+    });
+    expect(meme?.type).toBe('meme');
+    expect(meme?.content.args).toBe('A | B');
+  });
+
   it('tanpa input -> null; command lain -> null', () => {
     expect(resolver.resolve({ command: '!stiker', args: '' })?.type ?? null).toBe(null);
     expect(resolver.resolve({ command: '!ping', args: '' })).toBe(null);

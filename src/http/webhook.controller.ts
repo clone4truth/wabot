@@ -7,6 +7,7 @@ import { StickerService } from '../stickers/sticker.service';
 import { parseCommand } from '../commands/parser';
 import { CommandRouter } from '../commands/router';
 import { createStikerHandler } from '../commands/stiker.handler';
+import { createTtpHandler } from '../commands/ttp.handler';
 import { createToimgHandler } from '../commands/toimg.handler';
 import { createTogifHandler } from '../commands/togif.handler';
 import { handleMenu } from '../commands/menu.handler';
@@ -27,6 +28,7 @@ const wahaClient = new WAHAClient();
 const commandRouter = new CommandRouter();
 
 commandRouter.register('stiker', createStikerHandler(stickerService));
+commandRouter.register('ttp', createTtpHandler(stickerService));
 commandRouter.register('toimg', createToimgHandler(stickerService));
 commandRouter.register('togif', createTogifHandler(stickerService));
 
