@@ -34,8 +34,9 @@ async function checkWAHA(): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${env.wahaBaseUrl}/api/sendText/default`, {
-      method: 'POST',
+    const res = await fetch(`${env.wahaBaseUrl}/api/sessions`, {
+      method: 'GET',
+      headers: { 'X-Api-Key': env.wahaApiKey },
       signal: controller.signal,
     });
     clearTimeout(timeout);
