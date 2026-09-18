@@ -11,6 +11,7 @@ import { VideoStickerProcessor } from './processors/video.processor';
 import { ToImageProcessor } from './processors/toimg.processor';
 import { ToGifProcessor } from './processors/togif.processor';
 import { InputResolver, ResolvedInput } from './input.resolver';
+import { PerUserConcurrency } from './concurrency';
 import { downloadMedia } from '../media/downloader';
 import { WAHAClient } from '../whatsapp/waha.client';
 import Sharp from 'sharp';
@@ -22,6 +23,12 @@ import { ErrorCode } from '../errors/error-codes';
 export class StickerService {
   private inputResolver = new InputResolver();
   private wahaClient = new WAHAClient();
+  private videoSlots: PerUserConcurrency;
+
+  constructor(videoSlots?: PerUserConcurrency) {
+    this.videoSlots = videoSlots ?? new PerUserConcurrency();
+  }
+
   private processors = {
     text: new BubbleProcessor(),
     plainText: new TextStickerProcessor(),
@@ -53,14 +60,22 @@ export class StickerService {
     }
 
     const timeoutMs = this.getTimeout(input.type);
-    const raw = await Promise.race([
-      this.runProcessor(input),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs)
-      ),
-    ]);
-
-    return this.withPackMeta(raw, input.type);
+    const needsSlot = input.type === 'video' || input.type === 'togif';
+    const slotKey = `video:${senderId}`;
+    if (needsSlot && !this.videoSlots.tryAcquire(slotKey)) {
+      throw new AppError(ErrorCode.VIDEO_BUSY, 'Video masih diproses');
+    }
+    try {
+      const raw = await Promise.race([
+        this.runProcessor(input),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs)
+        ),
+      ]);
+      return this.withPackMeta(raw, input.type);
+    } finally {
+      if (needsSlot) this.videoSlots.release(slotKey);
+    }
   }
 
   // Metadata pack WhatsApp (nama pack + emoji) untuk webp statis.

@@ -88,4 +88,25 @@ describe('StickerService dispatcher', () => {
     expect(result?.mimetype).toBe('image/webp');
     if (fs.existsSync(jpgPath)) fs.unlinkSync(jpgPath);
   });
+
+  it('video kedua saat slot penuh -> VIDEO_BUSY', async () => {
+    const { PerUserConcurrency } = await import('../../src/stickers/concurrency');
+    const limited = new StickerService(new PerUserConcurrency(1));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    dlMock.downloadMedia.mockImplementationOnce(() => gate.then(() => ({
+      filePath: '/tmp/tidak-ada.mp4', mimeType: 'video/mp4', size: 1,
+    })));
+    const videoMsg = {
+      command: '!stiker', args: '',
+      reply: { media: { url: 'http://x/v.mp4', mimetype: 'video/mp4' } }, ...base,
+    };
+    const first = limited.process(videoMsg);
+    await new Promise((r) => setTimeout(r, 20));
+    await expect(limited.process(videoMsg)).rejects.toMatchObject({ code: ErrorCode.VIDEO_BUSY });
+    release();
+    await first.catch(() => {});
+  });
 });
