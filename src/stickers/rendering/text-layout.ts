@@ -16,7 +16,7 @@ export interface TextLayoutOptions {
 // Escape karakter khusus XML agar teks user tidak merusak markup Pango
 // (mis. "&", "<", ">" pada "!stiker a & b" atau "<3").
 export function escapePangoMarkup(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Buffer> {

@@ -4,7 +4,10 @@ import { ImageStickerProcessor } from './processors/image.processor';
 import { VideoStickerProcessor } from './processors/video.processor';
 import { ToImageProcessor } from './processors/toimg.processor';
 import { ToGifProcessor } from './processors/togif.processor';
-import { InputResolver } from './input.resolver';
+import { InputResolver, ResolvedInput } from './input.resolver';
+import { downloadMedia } from '../media/downloader';
+import Sharp from 'sharp';
+import fs from 'fs';
 import env from '../config/env';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
@@ -35,14 +38,9 @@ export class StickerService {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Unsupported input type');
     }
 
-    const processor = this.getProcessor(input.type);
-    if (!processor) {
-      throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'No processor for this input');
-    }
-
     const timeoutMs = this.getTimeout(input.type);
     const result = await Promise.race([
-      processor.process(input),
+      this.runProcessor(input),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')), timeoutMs)
       ),
@@ -51,15 +49,43 @@ export class StickerService {
     return result;
   }
 
-  private getProcessor(inputType: string) {
-    const map: Record<string, any> = {
-      text: this.processors.text,
-      image: this.processors.image,
-      video: this.processors.video,
-      toimg: this.processors.toimg,
-      togif: this.processors.togif,
-    };
-    return map[inputType];
+  // Ekstrak argumen primitif dari ResolvedInput sesuai signature tiap prosesor.
+  private async runProcessor(input: ResolvedInput): Promise<StickerResult | null> {
+    const content = input.content;
+
+    switch (input.type) {
+      case 'text':
+        return this.processors.text.process(content.text ?? '', input.modifier);
+      case 'image': {
+        if (!content.mediaUrl) {
+          throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
+        }
+        return this.processors.image.process(content.mediaUrl, input.modifier ?? 'full');
+      }
+      case 'video': {
+        if (!content.mediaUrl) {
+          throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
+        }
+        return this.processors.video.process(content.mediaUrl);
+      }
+      case 'toimg':
+      case 'togif': {
+        const url = content.mediaUrl;
+        if (!url) {
+          throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Reply stiker yang mau dikonversi tidak tersedia');
+        }
+        const { filePath } = await downloadMedia(url);
+        const stickerBuffer = await fs.promises.readFile(filePath);
+        if (input.type === 'toimg') {
+          const meta = await Sharp(stickerBuffer).metadata();
+          const isAnimated = (meta.pages ?? 1) > 1;
+          return this.processors.toimg.process(stickerBuffer, isAnimated);
+        }
+        return this.processors.togif.process(stickerBuffer);
+      }
+      default:
+        throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'No processor for this input');
+    }
   }
 
   private getTimeout(inputType: string): number {

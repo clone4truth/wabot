@@ -25,11 +25,11 @@ export class InputResolver {
     const commandName = command.replace(/^!/, '').toLowerCase();
 
     if (commandName === 'toimg') {
-      return { type: 'toimg', source: 'reply', content: { args: reply?.body || '' } };
+      return { type: 'toimg', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
     }
 
     if (commandName === 'togif') {
-      return { type: 'togif', source: 'reply', content: { args: reply?.body || '' } };
+      return { type: 'togif', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
     }
 
     if (commandName !== 'stiker') return null;
