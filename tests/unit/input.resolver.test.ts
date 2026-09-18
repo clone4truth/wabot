@@ -71,6 +71,21 @@ describe('InputResolver', () => {
     expect(toimg?.content.mediaUrl).toBe('http://x/s.webp');
   });
 
+  it('modifier gambar valid diteruskan, yang lain diabaikan', () => {
+    const circle = resolver.resolve({
+      command: '!stiker', args: 'circle', modifier: 'circle',
+      reply: { media: { url: 'http://x/a.jpg', mimetype: 'image/jpeg' } },
+    });
+    expect(circle?.type).toBe('image');
+    expect(circle?.modifier).toBe('circle');
+
+    const bogus = resolver.resolve({
+      command: '!stiker', args: 'meme', modifier: 'meme',
+      reply: { media: { url: 'http://x/a.jpg', mimetype: 'image/jpeg' } },
+    });
+    expect(bogus?.modifier).toBeUndefined();
+  });
+
   it('tanpa input -> null; command lain -> null', () => {
     expect(resolver.resolve({ command: '!stiker', args: '' })?.type ?? null).toBe(null);
     expect(resolver.resolve({ command: '!ping', args: '' })).toBe(null);

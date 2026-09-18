@@ -29,13 +29,16 @@ export class InputResolver {
   resolve(msg: {
     command: string;
     args: string;
+    modifier?: string;
     reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     senderName?: string;
     senderId?: string;
   }): ResolvedInput | null {
-    const { command, args, reply, media, senderName, senderId } = msg;
+    const { command, args, modifier, reply, media, senderName, senderId } = msg;
     const commandName = command.replace(/^!/, '').toLowerCase();
+    // Modifier gambar yang didukung image.processor; selain itu abaikan.
+    const imageModifier = ['full', 'crop', 'circle'].includes(modifier || '') ? modifier : undefined;
 
     if (commandName === 'toimg') {
       return { type: 'toimg', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
@@ -53,7 +56,7 @@ export class InputResolver {
         if (reply.media.mimetype?.startsWith('video')) {
           return { type: 'video', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args } };
         }
-        return { type: 'image', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args } };
+        return { type: 'image', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args }, modifier: imageModifier };
       }
       // Reply teks + ada args: args jadi isi, pesan reply jadi quote.
       // Reply teks tanpa args: isi pesan reply yang dijadikan stiker bubble.
@@ -80,7 +83,7 @@ export class InputResolver {
       if (media.mimetype?.startsWith('video')) {
         return { type: 'video', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args } };
       }
-      return { type: 'image', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args } };
+      return { type: 'image', source: 'media', content: { mediaUrl: media.url, mimetype: media.mimetype, args }, modifier: imageModifier };
     }
 
     // Priority 3: Direct text

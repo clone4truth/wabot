@@ -18,6 +18,26 @@ describe('validateMediaFile', () => {
     expect(result.valid).toBe(false);
     fs.unlinkSync(tmpPath);
   });
+
+  it('should validate MP4 ftyp box at offset 4', async () => {
+    const tmpPath = '/tmp/test_mp4_' + Date.now() + '.mp4';
+    const header = Buffer.alloc(12);
+    header.writeUInt32BE(12, 0);
+    header.write('ftyp', 4);
+    fs.writeFileSync(tmpPath, header);
+    const result = await validateMediaFile(tmpPath, ['video/mp4']);
+    expect(result.valid).toBe(true);
+    expect(result.detectedMime).toBe('video/mp4');
+    fs.unlinkSync(tmpPath);
+  });
+
+  it('should reject non-mp4 as video', async () => {
+    const tmpPath = '/tmp/test_notmp4_' + Date.now() + '.mp4';
+    fs.writeFileSync(tmpPath, Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+    const result = await validateMediaFile(tmpPath, ['video/mp4']);
+    expect(result.valid).toBe(false);
+    fs.unlinkSync(tmpPath);
+  });
 });
 
 describe('validateFileSize', () => {

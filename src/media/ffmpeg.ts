@@ -12,7 +12,7 @@ export async function getVideoMetadata(inputPath: string): Promise<{
   format: string;
 }> {
   return new Promise((resolve, reject) => {
-    ffmpeg().probe(inputPath, (err: any, metadata: any) => {
+    ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
       if (err) { reject(err); return; }
       const stream = metadata.streams?.find((s: any) => s.codec_type === 'video');
       resolve({

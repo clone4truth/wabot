@@ -16,6 +16,13 @@ export async function validateMediaFile(
   try {
     const buffer = await fs.promises.readFile(filePath);
     for (const mime of expectedMimeTypes) {
+      if (mime === 'video/mp4') {
+        // Box 'ftyp' MP4 ada di offset 4, bukan 0.
+        if (buffer.length > 8 && buffer.slice(4, 8).toString() === 'ftyp') {
+          return { valid: true, detectedMime: mime };
+        }
+        continue;
+      }
       const sig = MIME_SIGNATURES[mime];
       if (sig && buffer.slice(0, sig.length).equals(sig)) {
         return { valid: true, detectedMime: mime };

@@ -27,6 +27,7 @@ export class StickerService {
   async process(normalizedMessage: {
     command: string;
     args: string;
+    modifier?: string;
     reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     chatId: string;
@@ -34,8 +35,8 @@ export class StickerService {
     senderName?: string;
     isGroup: boolean;
   }): Promise<StickerResult | null> {
-    const { command, args, reply, media, senderName, senderId } = normalizedMessage;
-    const input = this.inputResolver.resolve({ command, args, reply, media, senderName, senderId });
+    const { command, args, modifier, reply, media, senderName, senderId } = normalizedMessage;
+    const input = this.inputResolver.resolve({ command, args, modifier, reply, media, senderName, senderId });
 
     if (!input) {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Unsupported input type');

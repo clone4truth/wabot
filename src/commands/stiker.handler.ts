@@ -10,6 +10,7 @@ export function createStikerHandler(stickerService: StickerService) {
       const result = await stickerService.process({
         command: `!${command.name}`,
         args: command.args,
+        modifier: command.modifier,
         reply: message.reply,
         media: message.media,
         chatId: message.chatId,
