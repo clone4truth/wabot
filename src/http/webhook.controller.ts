@@ -130,16 +130,17 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 }
 
 async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseCommand>>, message: any) {
+  const replyTo = message.messageId;
   switch (parsed.name) {
     case 'menu':
-      await wahaClient.sendText(message.chatId, handleMenu());
+      await wahaClient.sendText(message.chatId, handleMenu(), replyTo);
       break;
     case 'help':
-      await wahaClient.sendText(message.chatId, handleHelp());
+      await wahaClient.sendText(message.chatId, handleHelp(), replyTo);
       break;
     case 'ping':
       const ping = handlePing();
-      await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`);
+      await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`, replyTo);
       break;
     default:
       let result: any;
@@ -151,14 +152,18 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
         });
       } catch (err: any) {
         if (err instanceof AppError) {
-          await wahaClient.sendText(message.chatId, err.message);
+          await wahaClient.sendText(message.chatId, err.message, replyTo);
           return;
         }
         throw err;
       }
 
       if (result && result.buffer) {
-        await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
+        if (result.mimetype === 'image/webp') {
+          await wahaClient.sendSticker(message.chatId, result.buffer, replyTo);
+        } else {
+          await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype, replyTo);
+        }
       }
   }
 }

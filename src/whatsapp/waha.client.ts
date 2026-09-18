@@ -45,31 +45,48 @@ export class WAHAClient {
     return response.json().catch(() => ({}));
   }
 
-  async sendSticker(chatId: string, stickerBuffer: Buffer): Promise<void> {
+  async sendSticker(chatId: string, stickerBuffer: Buffer, replyTo?: string): Promise<void> {
+    await this.ensureChatLoaded(chatId);
     await this.post('/api/sendSticker', {
       file: {
         mimetype: 'image/webp',
         filename: 'sticker.webp',
         data: stickerBuffer.toString('base64'),
       },
+      ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendSticker', chatId);
     logger.info('Sticker sent via WAHA', { chatId });
   }
 
-  async sendImage(chatId: string, imageBuffer: Buffer, mimetype: string): Promise<void> {
+  async sendImage(chatId: string, imageBuffer: Buffer, mimetype: string, replyTo?: string): Promise<void> {
     const ext = mimetype.includes('png') ? 'png' : mimetype.includes('jpeg') || mimetype.includes('jpg') ? 'jpeg' : 'webp';
+    await this.ensureChatLoaded(chatId);
     await this.post('/api/sendImage', {
       file: {
         mimetype,
         filename: `image.${ext}`,
         data: imageBuffer.toString('base64'),
       },
+      ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendImage', chatId);
     logger.info('Image sent via WAHA', { chatId });
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
-    await this.post('/api/sendText', { text }, 'sendText', chatId);
+  async sendText(chatId: string, text: string, replyTo?: string): Promise<void> {
+    await this.post('/api/sendText', { text, ...(replyTo ? { reply_to: replyTo } : {}) }, 'sendText', chatId);
+  }
+
+  // Best-effort: paksa engine me-load chat ke store (membantu chat @lid).
+  private async ensureChatLoaded(chatId: string): Promise<void> {
+    try {
+      await fetch(`${this.baseUrl}/api/sendSeen`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ session: this.session, chatId }),
+      });
+    } catch {
+      // Abaikan — hanya pemanasan chat store.
+    }
   }
 
   async sendReaction(chatId: string, messageId: string, emoji: string): Promise<void> {
