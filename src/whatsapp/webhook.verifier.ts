@@ -12,7 +12,18 @@ export class WebhookVerifier {
       .createHmac('sha256', env.wahaWebhookHmacKey)
       .update(body)
       .digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+
+    const sig = signature.replace(/^sha256=/, '');
+
+    if (sig.length !== expected.length) {
+      return false;
+    }
+
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+    } catch {
+      return false;
+    }
   }
 
   verifyBody(body: string, signature: string): void {
