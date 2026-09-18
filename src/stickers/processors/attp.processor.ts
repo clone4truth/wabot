@@ -12,21 +12,29 @@ import { logger } from '../../observability/logger';
 import { escapeXml, validateText, wrapWords } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
 
-// Animated Text-to-Picture: teks ganti warna tiap frame -> webp animasi 512x512.
-const FRAME_COLORS = ['#ff004c', '#ff8a00', '#ffee00', '#00e676', '#00b0ff', '#d500f9', '#ff004c', '#ff8a00'];
-const FRAME_COUNT = 8;
-const FRAME_FPS = 8;
-
-interface TextLayout {
-  fontSize: number;
-  lines: string[];
-  lh: number;
-  startY: number;
-}
+import { defaultAnimationRegistry } from '../animations/registry';
+import { AnimationLayout } from '../animations/types';
 
 export class AttpProcessor {
-  async process(text: string, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<StickerResult> {
+  async process(
+    text: string,
+    effectOrTimeout?: string | number,
+    maybeTimeoutMs?: number,
+  ): Promise<StickerResult> {
+    let effectName: string | undefined;
+    let timeoutMs = env.videoProcessingTimeoutMs;
+
+    if (typeof effectOrTimeout === 'number') {
+      timeoutMs = effectOrTimeout;
+    } else if (typeof effectOrTimeout === 'string') {
+      effectName = effectOrTimeout;
+      if (typeof maybeTimeoutMs === 'number') {
+        timeoutMs = maybeTimeoutMs;
+      }
+    }
+
     const clean = validateText(text, { emptyMessage: 'Teks !attp tidak boleh kosong' });
+    const preset = defaultAnimationRegistry.get(effectName);
 
     // Hitung layout adaptif SATU KALI agar semua frame identik (tidak ada jitter/jumping).
     const layout = await this.calculateStableLayout(clean);
@@ -37,23 +45,21 @@ export class AttpProcessor {
 
     try {
       const family = getFontFamily(getDefaultFontPath());
+      const frameCount = preset.frameCount;
+      const fps = preset.fps;
 
-      for (let i = 0; i < FRAME_COUNT; i++) {
-        const color = FRAME_COLORS[i % FRAME_COLORS.length];
-        const texts = layout.lines
-          .map((line, idx) => {
-            const y = layout.startY + idx * layout.lh + Math.round(layout.fontSize * 0.85);
-            return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${layout.fontSize}" font-weight="bold" fill="${color}" stroke="#000000" stroke-width="4" paint-order="stroke">${escapeXml(line)}</text>`;
-          })
-          .join('');
-
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">${texts}</svg>`;
+      for (let i = 0; i < frameCount; i++) {
+        const svg = preset.renderSvg(i, {
+          text: clean,
+          layout,
+          fontFamily: family,
+        });
         await Sharp(Buffer.from(svg)).png().toFile(path.join(workdir, `${i}.png`));
       }
 
       await runFfmpegWithTimeout([
         '-y', '-loglevel', 'error',
-        '-framerate', String(FRAME_FPS),
+        '-framerate', String(fps),
         '-i', path.join(workdir, '%d.png'),
         '-c:v', 'libwebp',
         '-lossless', '0',
@@ -77,7 +83,7 @@ export class AttpProcessor {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Output ATTP tidak valid');
       }
 
-      logger.info('ATTP sticker dibuat', { frames: FRAME_COUNT, size: buffer.length, width: metadata.width, height: metadata.height });
+      logger.info('ATTP sticker dibuat', { effect: preset.name, frames: frameCount, size: buffer.length, width: metadata.width, height: metadata.height });
       return {
         buffer,
         mimetype: 'image/webp',
@@ -96,7 +102,7 @@ export class AttpProcessor {
     }
   }
 
-  private async calculateStableLayout(text: string): Promise<TextLayout> {
+  private async calculateStableLayout(text: string): Promise<AnimationLayout> {
     const maxWidth = 440;
     const maxHeight = 400;
 
