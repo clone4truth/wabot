@@ -1,49 +1,46 @@
 import env from '../config/env';
-
-interface IdempotencyEntry {
-  processed: boolean;
-  expiresAt: number;
-}
+import { JsonFileStore, getSharedStore } from '../storage/json-store';
 
 export class IdempotencyGuard {
-  private cache = new Map<string, IdempotencyEntry>();
+  private readonly store: JsonFileStore;
 
   constructor(
-    private readonly ttlMs: number = env.tempFileTtlSeconds * 1000,
-    private readonly maxSize: number = 10_000
-  ) {}
+    private readonly ttlMs: number = 24 * 60 * 60 * 1000,
+    private readonly maxSize: number = 10_000,
+    store?: JsonFileStore,
+  ) {
+    this.store = store ?? getSharedStore(env.dataDir);
+  }
+
+  private namespaced(key: string): string {
+    return `idem:${key}`;
+  }
 
   isDuplicate(key: string): boolean {
-    const entry = this.cache.get(key);
-    if (!entry) return false;
-    if (Date.now() > entry.expiresAt) {
-      this.cache.delete(key);
-      return false;
-    }
-    return entry.processed;
+    return this.store.get(this.namespaced(key)) === true;
   }
 
   markProcessed(key: string): void {
-    this.evictExpired();
-    if (this.cache.size >= this.maxSize) {
-      const oldest = Array.from(this.cache.entries()).sort(
-        (a, b) => a[1].expiresAt - b[1].expiresAt
-      )[0]?.[0];
-      if (oldest) this.cache.delete(oldest);
-    }
-    this.cache.set(key, { processed: true, expiresAt: Date.now() + this.ttlMs });
+    this.evictIfFull();
+    this.store.set(this.namespaced(key), true, this.ttlMs);
   }
 
-  private evictExpired(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.cache) {
-      if (now > entry.expiresAt) {
-        this.cache.delete(key);
-      }
+  private evictIfFull(): void {
+    const keys = this.store.keys().filter((k) => k.startsWith('idem:'));
+    if (keys.length < this.maxSize) return;
+    // Hapus yang kedaluwarsa dulu, lalu yang tertua bila masih penuh.
+    this.store.prune();
+    const remaining = this.store.keys().filter((k) => k.startsWith('idem:'));
+    for (let i = 0; i <= remaining.length - this.maxSize; i++) {
+      this.store.delete(remaining[i]);
     }
   }
 
   get size(): number {
-    return this.cache.size;
+    return this.store.keys().filter((k) => k.startsWith('idem:')).length;
+  }
+
+  flush(): void {
+    this.store.flush();
   }
 }

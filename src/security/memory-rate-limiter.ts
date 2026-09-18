@@ -1,5 +1,6 @@
 import { RateLimiter, RateLimitResult } from './rate-limiter';
 import env from '../config/env';
+import { JsonFileStore, getSharedStore } from '../storage/json-store';
 
 interface Bucket {
   count: number;
@@ -7,15 +8,21 @@ interface Bucket {
 }
 
 export class MemoryRateLimiter implements RateLimiter {
-  private buckets = new Map<string, Bucket>();
+  private readonly store: JsonFileStore;
   private readonly windowMs = 60_000;
+
+  constructor(store?: JsonFileStore) {
+    this.store = store ?? getSharedStore(env.dataDir);
+  }
 
   async consume(key: string, cost: number = 1): Promise<RateLimitResult> {
     const now = Date.now();
-    const bucket = this.buckets.get(key);
+    const storeKey = `rate:${key}`;
+    const bucket = this.store.get(storeKey) as Bucket | undefined;
 
     if (!bucket || now - bucket.windowStart > this.windowMs) {
-      this.buckets.set(key, { count: cost, windowStart: now });
+      const fresh = { count: cost, windowStart: now };
+      this.store.set(storeKey, fresh, this.windowMs);
       return { allowed: true, remaining: Math.max(0, this.getLimit(key) - cost), resetAt: now + this.windowMs };
     }
 
@@ -24,8 +31,9 @@ export class MemoryRateLimiter implements RateLimiter {
       return { allowed: false, remaining: 0, resetAt: bucket.windowStart + this.windowMs };
     }
 
-    bucket.count += cost;
-    return { allowed: true, remaining: Math.max(0, limit - bucket.count), resetAt: bucket.windowStart + this.windowMs };
+    const updated = { count: bucket.count + cost, windowStart: bucket.windowStart };
+    this.store.set(storeKey, updated, Math.max(0, bucket.windowStart + this.windowMs - now));
+    return { allowed: true, remaining: Math.max(0, limit - updated.count), resetAt: bucket.windowStart + this.windowMs };
   }
 
   private getLimit(key: string): number {
@@ -34,11 +42,10 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 
   cleanup(): void {
-    const now = Date.now();
-    for (const [key, bucket] of this.buckets) {
-      if (now - bucket.windowStart > this.windowMs) {
-        this.buckets.delete(key);
-      }
-    }
+    this.store.prune();
+  }
+
+  flush(): void {
+    this.store.flush();
   }
 }

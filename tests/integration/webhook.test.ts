@@ -87,9 +87,10 @@ describe('Webhook end-to-end', () => {
   });
 
   it('eventId sama dua kali -> duplicate', async () => {
+    const dupId = uid('dup-msg');
     const payload = {
       event: 'message', session: 'bot',
-      payload: { id: 'dup-msg-1', timestamp: Date.now(), from: uid('user') + '@c.us', to: 'bot@c.us', body: '!ping', hasMedia: false },
+      payload: { id: dupId, timestamp: Date.now(), from: uid('user') + '@c.us', to: 'bot@c.us', body: '!ping', hasMedia: false },
     };
     const raw = JSON.stringify(payload);
     const first = await postWebhook(raw);
@@ -120,17 +121,21 @@ describe('Webhook end-to-end', () => {
     expect(buf.slice(0, 4).toString()).toBe('RIFF');
   }, 30000);
 
-  it('spam cepat dari satu user -> akhirnya 429', async () => {
+  it('spam cepat dari satu user -> rate_limited tanpa retry storm', async () => {
     const from = uid('spammer') + '@c.us';
-    const statuses: number[] = [];
+    const results: { status: number; body: string }[] = [];
     for (let i = 0; i < 12; i++) {
       const raw = JSON.stringify({
         event: 'message', session: 'bot',
         payload: { id: uid('spam'), timestamp: Date.now(), from, to: 'bot@c.us', body: '!ping', hasMedia: false },
       });
-      statuses.push((await postWebhook(raw)).statusCode);
+      const res = await postWebhook(raw);
+      results.push({ status: res.statusCode, body: res.body });
     }
-    expect(statuses).toContain(200);
-    expect(statuses[statuses.length - 1]).toBe(429);
+    // Ditangani dengan 200 + status rate_limited agar WAHA tidak me-retry.
+    expect(results).toContainEqual(expect.objectContaining({ status: 200 }));
+    const last = results[results.length - 1];
+    expect(last.status).toBe(200);
+    expect(JSON.parse(last.body).status).toBe('rate_limited');
   });
 });

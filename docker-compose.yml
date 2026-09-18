@@ -10,4 +10,7 @@ services:
       - WAHA_WEBHOOK_HMAC_KEY=${WAHA_WEBHOOK_HMAC_KEY}
       - APP_ENV=production
       - LOG_LEVEL=warn
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped

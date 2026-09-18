@@ -92,8 +92,9 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     const rateKey = message.isGroup ? `group:${message.chatId}` : message.senderId;
     const rateResult = await rateLimiter.consume(rateKey);
     if (!rateResult.allowed) {
+      // Sudah ditangani (balas peringatan) -> 200 agar WAHA tidak me-retry.
       await wahaClient.sendText(message.chatId, '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.');
-      return reply.code(429).send({ status: 'rate_limited' });
+      return reply.code(200).send({ status: 'rate_limited' });
     }
 
     const idempotencyKey = `${message.eventId}`;
