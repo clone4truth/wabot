@@ -1,6 +1,7 @@
 import Sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { renderTextToBuffer } from '../rendering/text-layout';
 import { StickerResult } from '../result';
@@ -15,17 +16,35 @@ const FRAME_COLORS = ['#ff004c', '#ff8a00', '#ffee00', '#00e676', '#00b0ff', '#d
 const FRAME_COUNT = 8;
 const FRAME_FPS = 8;
 
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(process.env.FFMPEG_PATH || 'ffmpeg', args, (err) => {
-      if (err) reject(err);
-      else resolve();
+    const child = execFile(process.env.FFMPEG_PATH || 'ffmpeg', args, (err) => {
+      if (!err) {
+        resolve();
+        return;
+      }
+      if ((err as any).killed || (err as any).code === 'ETIMEDOUT') {
+        reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout'));
+        return;
+      }
+      reject(err);
     });
+    child.once('error', () => {});
+    setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // abaikan bila proses sudah mati
+      }
+    }, timeoutMs);
+    if (typeof (child as any).unref === 'function') {
+      // Jangan unref child (harus selesai sebelum resolve); timer dibiarkan.
+    }
   });
 }
 
 export class AttpProcessor {
-  async process(text: string): Promise<StickerResult> {
+  async process(text: string, timeoutMs: number = env.videoProcessingTimeoutMs): Promise<StickerResult> {
     const clean = String(text ?? '').trim();
     if (!clean) {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Teks !attp tidak boleh kosong');
@@ -34,10 +53,8 @@ export class AttpProcessor {
       throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks maksimal ${env.maxTextLength} karakter`);
     }
 
-    if (!fs.existsSync(env.tempDir)) fs.mkdirSync(env.tempDir, { recursive: true });
-    const dir = env.tempDir;
-    const stamp = Date.now();
-    const framePaths: string[] = [];
+    const workdir = path.join(env.tempDir, `attp-${randomUUID()}`);
+    fs.mkdirSync(workdir, { recursive: true });
     const outputPath = createTempFile('.webp');
     try {
       for (let i = 0; i < FRAME_COUNT; i++) {
@@ -48,22 +65,20 @@ export class AttpProcessor {
           fontSize: 56,
           color: FRAME_COLORS[i % FRAME_COLORS.length],
         });
-        const framePath = path.join(dir, `attp_${stamp}_${i}.png`);
-        await Sharp(frame).png().toFile(framePath);
-        framePaths.push(framePath);
+        await Sharp(frame).png().toFile(path.join(workdir, `${i}.png`));
       }
 
       await runFfmpeg([
         '-y', '-loglevel', 'error',
         '-framerate', String(FRAME_FPS),
-        '-i', path.join(dir, `attp_${stamp}_%d.png`),
+        '-i', path.join(workdir, '%d.png'),
         '-c:v', 'libwebp',
         '-lossless', '0',
         '-quality', '75',
         '-loop', '0',
         '-an',
         outputPath,
-      ]);
+      ], timeoutMs);
 
       const buffer = await fs.promises.readFile(outputPath);
       logger.info('ATTP sticker dibuat', { frames: FRAME_COUNT, size: buffer.length });
@@ -76,7 +91,11 @@ export class AttpProcessor {
         size: buffer.length,
       };
     } finally {
-      for (const p of framePaths) cleanupTempFile(p);
+      try {
+        fs.rmSync(workdir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
       cleanupTempFile(outputPath);
     }
   }

@@ -120,4 +120,19 @@ describe('StickerService dispatcher', () => {
     release();
     await first.catch(() => {});
   });
+
+  it('!toimg: file download dihapus segera setelah diproses', async () => {
+    const Sharp = (await import('sharp')).default;
+    const fs = (await import('fs')).default;
+    const png = await Sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 5, g: 5, b: 5, alpha: 1 } } }).webp().toBuffer();
+    const tracked = '/tmp/test_toimg_tracked.webp';
+    fs.writeFileSync(tracked, png);
+    dlMock.downloadMedia.mockResolvedValue({ filePath: tracked, mimeType: 'image/webp', size: png.length });
+    const result = await service.process({
+      command: '!toimg', args: '',
+      reply: { media: { url: 'http://x/s.webp', mimetype: 'image/webp' } }, ...base,
+    });
+    expect(result?.mimetype).toBe('image/png');
+    expect(fs.existsSync(tracked)).toBe(false);
+  });
 });

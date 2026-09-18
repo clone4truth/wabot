@@ -37,17 +37,25 @@ describe('Media URL (WAHA localhost rewrite + SSRF allowlist)', () => {
     expect(resolveMediaUrl('bukan-url')).toBe('bukan-url');
   });
 
-  it('allowlist: host WAHA + loopback lolos, evil ditolak', () => {
-    expect(isAllowedOrigin('https://waha.example.com/api/files/a.jpg')).toBe(true);
-    expect(isAllowedOrigin('http://localhost:3000/api/files/a.jpg')).toBe(true);
-    expect(isAllowedOrigin('http://127.0.0.1:3000/api/files/a.jpg')).toBe(true);
-    expect(isAllowedOrigin('https://evil.com/x.jpg')).toBe(false);
+  it('exact origin: hanya origin WAHA persis yang lolos', () => {
+    expect(isAllowedOrigin('https://waha.example.com/a')).toBe(true);
+    expect(isAllowedOrigin('http://waha.example.com/a')).toBe(false);
+    expect(isAllowedOrigin('https://waha.example.com:8443/a')).toBe(false);
+    expect(isAllowedOrigin('http://127.0.0.1:3000/a')).toBe(false);
+    expect(isAllowedOrigin('http://localhost:3000/a')).toBe(false);
+    expect(isAllowedOrigin('https://evil.com/a')).toBe(false);
     expect(isAllowedOrigin('bukan-url')).toBe(false);
+  });
+
+  it('localhost tidak di-whitelist setelah rewrite (rewrite dulu, validasi final)', () => {
+    // resolveMediaUrl menulis ulang loopback -> base, lalu exact-check final URL.
+    expect(isAllowedOrigin(resolveMediaUrl('http://localhost:3000/api/files/a.jpg'))).toBe(true);
   });
 
   it('allowlist bekerja untuk base URL ber-port (regresi host-vs-hostname)', () => {
     env.wahaBaseUrl = 'http://localhost:3001';
     expect(isAllowedOrigin('http://localhost:3001/api/files/a.jpg')).toBe(true);
+    expect(isAllowedOrigin('http://localhost:3002/api/files/a.jpg')).toBe(false);
     env.wahaBaseUrl = 'https://waha.example.com';
   });
 });
@@ -118,6 +126,7 @@ describe('downloadMedia size limits + redirect SSRF', () => {
     buf.write('ftyp', 4);
     return buf;
   };
+  const portOf = (url: string) => new URL(url).port;
 
   beforeAll(async () => {
     savedBase = env.wahaBaseUrl;
@@ -135,6 +144,9 @@ describe('downloadMedia size limits + redirect SSRF', () => {
       else if (req.url === '/redir') { res.writeHead(302, { Location: '/img100.jpg' }); res.end(); }
       else if (req.url === '/rel') { res.writeHead(302, { Location: 'img100.jpg' }); res.end(); }
       else if (req.url === '/redir-evil') { res.writeHead(302, { Location: 'http://evil.invalid/x.jpg' }); res.end(); }
+      else if (req.url === '/redir-scheme') { res.writeHead(302, { Location: `https://localhost:${portOf(baseUrl)}/img100.jpg` }); res.end(); }
+      else if (req.url === '/redir-port') { res.writeHead(302, { Location: 'http://localhost:1/img100.jpg' }); res.end(); }
+      else if (req.url === '/redir-local') { res.writeHead(302, { Location: `http://127.0.0.1:${portOf(baseUrl)}/img100.jpg` }); res.end(); }
       else if (req.url === '/loop') { res.writeHead(302, { Location: '/loop' }); res.end(); }
       else { res.writeHead(404); res.end('{}'); }
     });
@@ -213,5 +225,11 @@ describe('downloadMedia size limits + redirect SSRF', () => {
   it('redirect ke evil + loop ditolak', async () => {
     await expect(downloadMedia(`${baseUrl}/redir-evil`)).rejects.toThrow(/SSRF|evil/);
     await expect(downloadMedia(`${baseUrl}/loop`)).rejects.toThrow(/redirect/i);
+  });
+
+  it('redirect beda scheme/port/loopback ditolak', async () => {
+    await expect(downloadMedia(`${baseUrl}/redir-scheme`)).rejects.toThrow(/SSRF/);
+    await expect(downloadMedia(`${baseUrl}/redir-port`)).rejects.toThrow(/SSRF/);
+    await expect(downloadMedia(`${baseUrl}/redir-local`)).rejects.toThrow(/SSRF/);
   });
 });

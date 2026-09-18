@@ -70,6 +70,17 @@ describe('WAHAClient (format API resmi)', () => {
     expect(last.body.file).toMatchObject({ mimetype: 'image/webp', filename: 'sticker.webp' });
   });
 
+  it('sendVideo: path + session + base64 + reply_to', async () => {
+    await client().sendVideo('1@c.us', Buffer.from('vid'), 'video/mp4', 'msg_9');
+    const last = seen[seen.length - 1];
+    expect(last.url).toBe('/api/sendVideo');
+    expect(last.body).toMatchObject({
+      session: 'bot', chatId: '1@c.us', reply_to: 'msg_9',
+    });
+    expect(last.body.file).toMatchObject({ mimetype: 'video/mp4', filename: 'video.mp4' });
+    expect(typeof last.body.file.data).toBe('string');
+  });
+
   it('gagal kirim -> AppError WAHA_SEND_FAILED', async () => {
     failNext = 1;
     try {

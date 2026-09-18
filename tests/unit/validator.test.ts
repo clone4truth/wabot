@@ -56,14 +56,19 @@ describe('validateFileSize', () => {
   });
 });
 
-describe('isAllowedOrigin', () => {
-  it('should allow same origin', () => {
-    process.env.WAHA_BASE_URL = 'http://localhost:3001';
-    expect(isAllowedOrigin('http://localhost:3001/api/files/test')).toBe(true);
+describe('isAllowedOrigin (exact origin)', () => {
+  it('should allow same origin', async () => {
+    const env = (await import('../../src/config/env')).default;
+    const saved = env.wahaBaseUrl;
+    env.wahaBaseUrl = 'http://localhost:3001';
+    try {
+      expect(isAllowedOrigin('http://localhost:3001/api/files/test')).toBe(true);
+    } finally {
+      env.wahaBaseUrl = saved;
+    }
   });
 
   it('should reject arbitrary URL', () => {
-    process.env.WAHA_BASE_URL = 'http://localhost:3001';
     expect(isAllowedOrigin('http://evil.com/file')).toBe(false);
   });
 });

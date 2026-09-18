@@ -1,6 +1,8 @@
 import fs from 'fs';
 import env from '../config/env';
 import { logger } from '../observability/logger';
+import { AppError } from '../errors/app-error';
+import { ErrorCode } from '../errors/error-codes';
 import { createTempFile } from './temp-files';
 
 const ffmpeg = require('fluent-ffmpeg');
@@ -30,10 +32,12 @@ export async function convertVideoToAnimatedWebp(
   outputPath: string,
   maxWidth: number = 512,
   maxDurationSec: number = env.maxVideoDurationSeconds,
-  fps: number = 15
+  fps: number = 15,
+  timeoutMs: number = env.videoProcessingTimeoutMs,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
+    let settled = false;
+    const command: any = ffmpeg(inputPath)
       .outputOptions([
         `-vf scale=${maxWidth}:${maxWidth}:force_original_aspect_ratio=decrease`,
         `-t ${maxDurationSec}`,
@@ -45,14 +49,31 @@ export async function convertVideoToAnimatedWebp(
         `-delay ${1000 / fps}`,
       ])
       .outputOptions(['-an'])
-      .outputFormat('webp')
+      .outputFormat('webp');
+    const timer = setTimeout(() => {
+      try {
+        command.kill('SIGKILL');
+      } catch {
+        // abaikan bila proses sudah mati
+      }
+      done(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')));
+    }, timeoutMs);
+    if (typeof (timer as any).unref === 'function') (timer as any).unref();
+    function done(fn: () => void): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    }
+    command
+      .output(outputPath)
       .on('end', () => {
         logger.info('Video converted to animated WebP');
-        resolve();
+        done(resolve);
       })
       .on('error', (err: Error) => {
         logger.error('FFmpeg conversion failed', { error: String(err) });
-        reject(err);
+        done(() => reject(err));
       })
       .save(outputPath);
   });

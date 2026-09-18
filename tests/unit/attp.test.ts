@@ -14,4 +14,15 @@ describe('AttpProcessor (teks animasi)', () => {
   it('teks kosong ditolak dengan jelas', async () => {
     await expect(new AttpProcessor().process('   ')).rejects.toThrow();
   });
+
+  it('timeout -> PROCESSING_TIMEOUT + workspace bersih', async () => {
+    const env = (await import('../../src/config/env')).default;
+    const fs = await import('fs');
+    const before = new Set(fs.readdirSync(env.tempDir).filter((f: string) => f.startsWith('attp-')));
+    await expect(new AttpProcessor().process('halo dunia', 50)).rejects.toMatchObject({
+      code: 'PROCESSING_TIMEOUT',
+    });
+    const leaked = fs.readdirSync(env.tempDir).filter((f: string) => f.startsWith('attp-') && !before.has(f));
+    expect(leaked).toEqual([]);
+  }, 60000);
 });

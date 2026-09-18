@@ -56,7 +56,7 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **ToGifProcessor**: Animated sticker → MP4
 
 ### Layer 6: Media
-- **MediaDownloader**: Download media dari WAHA dengan SSRF protection
+- **MediaDownloader**: Download media dari exact WAHA origin (redirect tervalidasi), size cap streaming
 - **Validator**: MIME signature, file size, content validation
 - **FFmpeg**: Video metadata, conversion to animated WebP
 - **TempFiles**: Create, cleanup, orphan cleanup

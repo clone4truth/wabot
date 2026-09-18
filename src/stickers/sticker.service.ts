@@ -13,6 +13,7 @@ import { ToImageProcessor } from './processors/toimg.processor';
 import { ToGifProcessor } from './processors/togif.processor';
 import { InputResolver, ResolvedInput } from './input.resolver';
 import { PerUserConcurrency } from './concurrency';
+import { cleanupTempFile } from '../media/temp-files';
 import { downloadMedia } from '../media/downloader';
 import { WAHAClient } from '../whatsapp/waha.client';
 import Sharp from 'sharp';
@@ -146,13 +147,17 @@ export class StickerService {
           throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Reply stiker yang mau dikonversi tidak tersedia');
         }
         const { filePath } = await downloadMedia(url);
-        const stickerBuffer = await fs.promises.readFile(filePath);
-        if (input.type === 'toimg') {
-          const meta = await Sharp(stickerBuffer).metadata();
-          const isAnimated = (meta.pages ?? 1) > 1;
-          return this.processors.toimg.process(stickerBuffer, isAnimated);
+        try {
+          const stickerBuffer = await fs.promises.readFile(filePath);
+          if (input.type === 'toimg') {
+            const meta = await Sharp(stickerBuffer).metadata();
+            const isAnimated = (meta.pages ?? 1) > 1;
+            return this.processors.toimg.process(stickerBuffer, isAnimated);
+          }
+          return this.processors.togif.process(stickerBuffer);
+        } finally {
+          cleanupTempFile(filePath);
         }
-        return this.processors.togif.process(stickerBuffer);
       }
       default:
         throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'No processor for this input');

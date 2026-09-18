@@ -1,4 +1,5 @@
 import Sharp from 'sharp';
+import { randomUUID } from 'crypto';
 import { VideoResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
@@ -7,7 +8,6 @@ import { logger } from '../../observability/logger';
 import env from '../../config/env';
 import fs from 'fs';
 import path from 'path';
-
 export class ToGifProcessor {
   async process(stickerBuffer: Buffer): Promise<VideoResult> {
     // Input wajib animated (stiker statis -> tolak dengan arahan).
@@ -21,34 +21,49 @@ export class ToGifProcessor {
       throw new AppError(ErrorCode.UNSUPPORTED_STICKER_TYPE, 'Static sticker tidak bisa dikonversi ke GIF');
     }
 
-    const dir = env.tempDir;
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const stamp = Date.now();
+    const workdir = path.join(env.tempDir, `togif-${randomUUID()}`);
+    fs.mkdirSync(workdir, { recursive: true });
     const outputPath = createTempFile('.mp4');
-    const framePaths: string[] = [];
 
     try {
       // Ekstrak frame via Sharp (decoder webp ffmpeg tidak stabil) lalu encode.
       const count = Math.min(pages, 30);
       for (let i = 0; i < count; i++) {
-        const framePath = path.join(dir, `togif_${stamp}_${i}.png`);
+        const framePath = path.join(workdir, `${i}.png`);
         const png = await Sharp(stickerBuffer, { page: i }).png().toBuffer();
         await fs.promises.writeFile(framePath, png);
-        framePaths.push(framePath);
       }
 
+      const timeoutMs = env.videoProcessingTimeoutMs;
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
         const ffmpeg = require('fluent-ffmpeg');
-        ffmpeg()
-          .input(path.join(dir, `togif_${stamp}_%d.png`))
+        const command: any = ffmpeg()
+          .input(path.join(workdir, '%d.png'))
           .inputOptions(['-framerate 10'])
           .outputFormat('mp4')
           .outputOptions(['-pix_fmt yuv420p', '-movflags +faststart'])
-          .output(outputPath)
-          .on('end', () => resolve())
+          .output(outputPath);
+        const timer = setTimeout(() => {
+          try {
+            command.kill('SIGKILL');
+          } catch {
+            // abaikan bila proses sudah mati
+          }
+          done(() => reject(new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout')));
+        }, timeoutMs);
+        if (typeof (timer as any).unref === 'function') (timer as any).unref();
+        function done(fn: () => void): void {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+        }
+        command
+          .on('end', () => done(resolve))
           .on('error', (err: Error) => {
             logger.error('ToGif conversion failed', { error: String(err) });
-            reject(err);
+            done(() => reject(err));
           })
           .run();
       });
@@ -69,7 +84,12 @@ export class ToGifProcessor {
         size: mp4Buffer.length,
       };
     } finally {
-      for (const p of framePaths) cleanupTempFile(p);
+      // Hapus seluruh workspace (frames + output bila gagal).
+      try {
+        fs.rmSync(workdir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
       cleanupTempFile(outputPath);
     }
   }

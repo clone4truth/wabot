@@ -67,6 +67,38 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     expect(meta.height).toBeLessThanOrEqual(512);
   }, 60000);
 
+  it('video timeout -> PROCESSING_TIMEOUT + ffmpeg mati', async () => {
+    const { convertVideoToAnimatedWebp } = await import('../../src/media/ffmpeg');
+    const { execSync } = await import('child_process');
+    const out = `/tmp/timeout_${Date.now()}.webp`;
+    const fs = await import('fs');
+    try {
+      await expect(
+        convertVideoToAnimatedWebp(`${workdir}/short.mp4`, out, 512, 10, 15, 150),
+      ).rejects.toMatchObject({ code: ErrorCode.PROCESSING_TIMEOUT });
+      // Pastikan tidak ada proses ffmpeg yatim untuk output ini.
+      const base = out.split('/').pop() as string;
+      let leaked = true;
+      for (let i = 0; i < 30; i++) {
+        try {
+          const ps = execSync('ps -eo args').toString();
+          leaked = ps.split('\n').some((line) => line.includes('ffmpeg') && line.includes(base));
+        } catch {
+          leaked = false;
+        }
+        if (!leaked) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(leaked).toBe(false);
+    } finally {
+      try {
+        fs.unlinkSync(out);
+      } catch {
+        // abaikan
+      }
+    }
+  }, 60000);
+
   it('video > 10 detik -> VIDEO_TOO_LONG (bukan silent trim)', async () => {
     await expect(new VideoStickerProcessor().process('http://x/long.mp4')).rejects.toMatchObject({
       code: ErrorCode.VIDEO_TOO_LONG,
@@ -94,6 +126,23 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     await expect(new ToImageProcessor().process(animated.buffer, true)).rejects.toMatchObject({
       code: ErrorCode.UNSUPPORTED_STICKER_TYPE,
     });
+  }, 120000);
+
+  it('!togif konkuren: workspace UUID tidak tabrakan + bersih', async () => {
+    const env = (await import('../../src/config/env')).default;
+    const before = new Set(
+      (await import('fs')).readdirSync(env.tempDir).filter((f: string) => f.startsWith('togif-')),
+    );
+    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
+    const results = await Promise.all([
+      new ToGifProcessor().process(animated.buffer),
+      new ToGifProcessor().process(animated.buffer),
+    ]);
+    expect(results[0].mimetype).toBe('video/mp4');
+    expect(results[1].mimetype).toBe('video/mp4');
+    const fs = await import('fs');
+    const leaked = fs.readdirSync(env.tempDir).filter((f: string) => f.startsWith('togif-') && !before.has(f));
+    expect(leaked).toEqual([]);
   }, 120000);
 
   it('!togif: animated -> MP4; static -> ditolak', async () => {

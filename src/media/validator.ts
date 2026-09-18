@@ -55,14 +55,10 @@ export async function validateImageContent(filePath: string): Promise<boolean> {
 
 export function isAllowedOrigin(url: string): boolean {
   try {
-    const parsed = new URL(url);
-    // Bandingkan hostname (tanpa port): .host ikut menyertakan port sehingga
-    // perbandingan lama selalu gagal untuk URL ber-port.
-    const allowedHostname = new URL(env.wahaBaseUrl).hostname;
-    return (
-      parsed.hostname === allowedHostname ||
-      ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-    );
+    const candidate = new URL(url);
+    const allowed = new URL(env.wahaBaseUrl);
+    // Exact origin: scheme + hostname + port harus sama persis.
+    return candidate.origin === allowed.origin;
   } catch {
     return false;
   }

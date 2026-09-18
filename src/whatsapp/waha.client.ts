@@ -58,8 +58,13 @@ export class WAHAClient {
     logger.info('Sticker sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
   }
 
-  async sendImage(chatId: string, imageBuffer: Buffer, mimetype: string, replyTo?: string): Promise<void> {
-    const ext = mimetype.includes('png') ? 'png' : mimetype.includes('jpeg') || mimetype.includes('jpg') ? 'jpeg' : 'webp';
+  async sendImage(
+    chatId: string,
+    imageBuffer: Buffer,
+    mimetype: 'image/png' | 'image/jpeg' | 'image/webp',
+    replyTo?: string,
+  ): Promise<void> {
+    const ext = mimetype.includes('png') ? 'png' : mimetype.includes('jpeg') ? 'jpeg' : 'webp';
     await this.ensureChatLoaded(chatId);
     await this.post('/api/sendImage', {
       file: {
@@ -70,6 +75,24 @@ export class WAHAClient {
       ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendImage', chatId);
     logger.info('Image sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
+  }
+
+  async sendVideo(
+    chatId: string,
+    videoBuffer: Buffer,
+    mimetype: 'video/mp4',
+    replyTo?: string,
+  ): Promise<void> {
+    await this.ensureChatLoaded(chatId);
+    await this.post('/api/sendVideo', {
+      file: {
+        mimetype,
+        filename: 'video.mp4',
+        data: videoBuffer.toString('base64'),
+      },
+      ...(replyTo ? { reply_to: replyTo } : {}),
+    }, 'sendVideo', chatId);
+    logger.info('Video sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
   }
 
   async sendText(chatId: string, text: string, replyTo?: string): Promise<void> {

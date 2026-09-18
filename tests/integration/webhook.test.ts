@@ -8,6 +8,7 @@ const wahaMocks = vi.hoisted(() => ({
   sendText: vi.fn().mockResolvedValue(undefined),
   sendImage: vi.fn().mockResolvedValue(undefined),
   sendSticker: vi.fn().mockResolvedValue(undefined),
+  sendVideo: vi.fn().mockResolvedValue(undefined),
   sendReaction: vi.fn().mockResolvedValue(undefined),
   getChatInfo: vi.fn().mockResolvedValue(null),
   getContactSavedName: vi.fn().mockResolvedValue(undefined),
@@ -17,6 +18,14 @@ const wahaMocks = vi.hoisted(() => ({
 
 vi.mock('../../src/whatsapp/waha.client', () => ({
   WAHAClient: vi.fn().mockImplementation(() => wahaMocks),
+}));
+
+// Mock download media: salin fixture lokal ke temp per panggilan
+// (prosesor menghapus file sumber setelah dipakai).
+const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
+vi.mock('../../src/media/downloader', () => ({
+  downloadMedia: dlMock.downloadMedia,
+  resolveMediaUrl: (u: string) => u,
 }));
 
 const KEY = 'integration-test-hmac-key';
@@ -162,6 +171,68 @@ describe('Webhook end-to-end', () => {
     expect(meta.pages).toBeGreaterThan(1);
   }, 60000);
 
+  it('reply stiker animasi + !togif -> sendVideo (bukan sendImage)', async () => {
+    const { execSync } = await import('child_process');
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'togif-it-'));
+    execSync(
+      `ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=1:size=128x128:rate=5 ` +
+      `-c:v libwebp -loop 0 ${dir}/anim.webp`,
+    );
+    dlMock.downloadMedia.mockImplementation(async () => {
+      const tmp = path.join(dir, `dl_${Date.now()}.webp`);
+      fs.copyFileSync(`${dir}/anim.webp`, tmp);
+      return { filePath: tmp, mimeType: 'image/webp', size: fs.statSync(tmp).size };
+    });
+    try {
+      const raw = rawMessage('!togif', {
+        replyTo: { id: 'st1', media: { url: 'http://x/s.webp', mimetype: 'image/webp' } },
+      });
+      const res = await postWebhook(raw);
+      expect(res.statusCode).toBe(200);
+      expect(wahaMocks.sendVideo).toHaveBeenCalledTimes(1);
+      const [chatId, buf, mime] = wahaMocks.sendVideo.mock.calls[0];
+      expect(typeof chatId).toBe('string');
+      expect(mime).toBe('video/mp4');
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect(wahaMocks.sendImage).not.toHaveBeenCalled();
+      expect(wahaMocks.sendSticker).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120000);
+
+  it('reply stiker statis + !toimg -> sendImage PNG', async () => {
+    const Sharp = (await import('sharp')).default;
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toimg-it-'));
+    const still = await Sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } } }).webp().toBuffer();
+    fs.writeFileSync(`${dir}/still.webp`, still);
+    dlMock.downloadMedia.mockImplementation(async () => {
+      const tmp = path.join(dir, `dl_${Date.now()}.webp`);
+      fs.copyFileSync(`${dir}/still.webp`, tmp);
+      return { filePath: tmp, mimeType: 'image/webp', size: fs.statSync(tmp).size };
+    });
+    try {
+      const raw = rawMessage('!toimg', {
+        replyTo: { id: 'st2', media: { url: 'http://x/s.webp', mimetype: 'image/webp' } },
+      });
+      const res = await postWebhook(raw);
+      expect(res.statusCode).toBe(200);
+      expect(wahaMocks.sendImage).toHaveBeenCalledTimes(1);
+      const [, buf, mime] = wahaMocks.sendImage.mock.calls[0];
+      expect(mime).toBe('image/png');
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect(wahaMocks.sendVideo).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
   it('spam cepat dari satu user -> rate_limited tanpa retry storm', async () => {
     const from = uid('spammer') + '@c.us';
     const results: { status: number; body: string }[] = [];
@@ -231,6 +302,34 @@ describe('Webhook end-to-end', () => {
     expect(res.statusCode).toBe(200);
     expect(wahaMocks.sendText).toHaveBeenCalledTimes(1);
     expect(wahaMocks.sendText.mock.calls[0][1]).toBe('❌ Teks maksimal 300 karakter.');
+  });
+
+  it('duplicate tidak memakan kuota user', async () => {
+    const from = uid('hemat') + '@c.us';
+    const mk = (id: string) => JSON.stringify({
+      event: 'message', session: 'bot',
+      payload: { id, timestamp: Date.now(), from, to: 'bot@c.us', body: '!ping', hasMedia: false },
+    });
+    const first = uid('dupq');
+    // 6 unik + 1 baru + 1 duplikat (tak dihitung) = 7 konsumsi; 2 unik berikut:
+    // ke-8 lolos, ke-9 rate_limited. Dengan order lama, duplikat ikut dihitung.
+    for (let i = 0; i < 6; i++) await postWebhook(mk(uid('q')));
+    await postWebhook(mk(first));
+    expect(JSON.parse((await postWebhook(mk(first))).body).duplicate).toBe(true);
+    expect(JSON.parse((await postWebhook(mk(uid('q')))).body).status || 'ok').toBe('ok');
+    expect(JSON.parse((await postWebhook(mk(uid('q')))).body).status).toBe('rate_limited');
+  });
+
+  it('duplikat konkuren dieksekusi sekali', async () => {
+    const raw = JSON.stringify({
+      event: 'message', session: 'bot',
+      payload: { id: uid('conc'), timestamp: Date.now(), from: uid('user') + '@c.us', to: 'bot@c.us', body: '!ping', hasMedia: false },
+    });
+    vi.clearAllMocks();
+    const [a, b] = await Promise.all([postWebhook(raw), postWebhook(raw)]);
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+    expect(wahaMocks.sendText).toHaveBeenCalledTimes(1);
   });
 
   it('sender terblokir -> diam (200 tanpa aksi)', async () => {

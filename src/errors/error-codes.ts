@@ -1,6 +1,7 @@
+import env from '../config/env';
+
 export enum ErrorCode {
-  INVALID_COMMAND = 'INVALID_COMMAND',
-  UNSUPPORTED_INPUT = 'UNSUPPORTED_INPUT',
+  INVALID_COMMAND = 'INVALID_COMMAND',  UNSUPPORTED_INPUT = 'UNSUPPORTED_INPUT',
   TEXT_TOO_LONG = 'TEXT_TOO_LONG',
   MEDIA_TOO_LARGE = 'MEDIA_TOO_LARGE',
   VIDEO_TOO_LONG = 'VIDEO_TOO_LONG',
@@ -20,7 +21,7 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.INVALID_COMMAND]: '❌ Perintah tidak dikenal. Gunakan !menu untuk daftar command.',
   [ErrorCode.UNSUPPORTED_INPUT]: '❌ Reply teks, foto, video, atau sticker yang didukung.',
   [ErrorCode.TEXT_TOO_LONG]: `❌ Teks maksimal ${300} karakter.`,
-  [ErrorCode.MEDIA_TOO_LARGE]: '❌ Ukuran gambar terlalu besar.',
+  [ErrorCode.MEDIA_TOO_LARGE]: '❌ Ukuran media terlalu besar.',
   [ErrorCode.VIDEO_TOO_LONG]: '❌ Video maksimal 10 detik.',
   [ErrorCode.MEDIA_DOWNLOAD_FAILED]: '❌ Gagal mengunduh media dari WAHA.',
   [ErrorCode.MEDIA_DECODE_FAILED]: '❌ Format media tidak didukung atau rusak.',
@@ -33,3 +34,15 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.UNSUPPORTED_STICKER_TYPE]: '❌ Tipe sticker tidak didukung. Animated → !togif, static → !toimg.',
   [ErrorCode.TEMP_FILE_CLEANUP_FAILED]: '⚠️ Gagal membersihkan file sementara.',
 };
+
+// Pesan user dinamis: limit configurable tercermin di respons (bukan hardcode).
+// Tidak memakai raw internal message agar tak bocor ke user.
+export function userMessageForError(err: { code: ErrorCode }): string {
+  if (err.code === ErrorCode.TEXT_TOO_LONG) {
+    return `❌ Teks maksimal ${env.maxTextLength} karakter.`;
+  }
+  if (err.code === ErrorCode.VIDEO_TOO_LONG) {
+    return `❌ Video maksimal ${env.maxVideoDurationSeconds} detik.`;
+  }
+  return userMessages[err.code] ?? '❌ Gagal membuat sticker.';
+}

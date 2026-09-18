@@ -17,7 +17,7 @@ import { handlePing } from '../commands/ping.handler';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AccessGuard } from '../security/access';
 import { AppError } from '../errors/app-error';
-import { ErrorCode, userMessages } from '../errors/error-codes';
+import { ErrorCode, userMessageForError } from '../errors/error-codes';
 import { ProcessingResult } from '../stickers/result';
 import env from '../config/env';
 import { logger } from '../observability/logger';
@@ -98,22 +98,22 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       return reply.code(200).send({ status: 'ok', denied: access.reason });
     }
 
-    // PRD: private -> user limit; group -> user limit DAN group limit.
-    const userResult = await rateLimiter.consume(`user:${message.senderId}`);
-    let groupResult = { allowed: true, remaining: 0, resetAt: 0 };
-    if (message.isGroup) {
-      groupResult = await rateLimiter.consume(`group:${message.chatId}`);
-    }
-    if (!userResult.allowed || !groupResult.allowed) {
-      // Sudah ditangani (balas peringatan) -> 200 agar WAHA tidak me-retry.
-      await wahaClient.sendText(message.chatId, '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.');
-      return reply.code(200).send({ status: 'rate_limited' });
-    }
-
     const idempotencyKey = `${message.eventId}`;
     if (idempotency.isDuplicate(idempotencyKey)) {
       logger.info('Duplicate webhook detected', { messageIdHash: hashIdentifier(message.eventId) });
       return reply.code(200).send({ status: 'ok', duplicate: true });
+    }
+
+    // Rate limit SETELAH duplicate check agar retry tidak memakan kuota.
+    // PRD: private -> user limit; group -> user limit DAN group limit.
+    const userResult = await rateLimiter.consume(`user:${message.senderId}`);
+    const groupResult = message.isGroup
+      ? await rateLimiter.consume(`group:${message.chatId}`)
+      : { allowed: true, remaining: 0, resetAt: 0 };
+    if (!userResult.allowed || !groupResult.allowed) {
+      // Sudah ditangani (balas peringatan) -> 200 agar WAHA tidak me-retry.
+      await wahaClient.sendText(message.chatId, '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.');
+      return reply.code(200).send({ status: 'rate_limited' });
     }
 
     const parsed = parseCommand(message.body, prefix);
@@ -194,18 +194,27 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
       } catch (err: any) {
         if (err instanceof AppError) {
           // Hanya pesan user yang stabil (Bahasa Indonesia); detail internal tetap di log.
-          await wahaClient.sendText(message.chatId, userMessages[err.code] ?? '❌ Gagal membuat sticker.', replyTo);
+          await wahaClient.sendText(message.chatId, userMessageForError(err), replyTo);
           return;
         }
         throw err;
       }
 
-      if (result && result.buffer) {
-        if (result.mimetype === 'image/webp') {
-          await wahaClient.sendSticker(message.chatId, result.buffer, replyTo);
-        } else {
-          await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype, replyTo);
-        }
+      if (result) {
+        await sendProcessingResult(result, message, replyTo);
       }
+  }
+}
+
+async function sendProcessingResult(result: ProcessingResult, message: any, replyTo?: string): Promise<void> {
+  if (result.mimetype === 'image/webp') {
+    await wahaClient.sendSticker(message.chatId, result.buffer, replyTo);
+  } else if (result.mimetype === 'image/png') {
+    await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype, replyTo);
+  } else if (result.mimetype === 'video/mp4') {
+    await wahaClient.sendVideo(message.chatId, result.buffer, result.mimetype, replyTo);
+  } else {
+    const mime = (result as { mimetype?: string })?.mimetype;
+    throw new AppError(ErrorCode.UNSUPPORTED_STICKER_TYPE, `Unsupported result type: ${mime}`);
   }
 }
