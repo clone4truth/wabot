@@ -14,6 +14,7 @@ export function createStikerHandler(stickerService: StickerService) {
         media: message.media,
         chatId: message.chatId,
         senderId: message.senderId,
+        senderName: message.senderName,
         isGroup: message.isGroup,
       });
 

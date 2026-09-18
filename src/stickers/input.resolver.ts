@@ -6,6 +6,11 @@ export interface ResolvedInput {
   source: 'reply' | 'media' | 'direct';
   content: {
     text?: string;
+    senderName?: string;
+    senderId?: string;
+    quotedSenderName?: string;
+    quotedSenderId?: string;
+    quotedBody?: string;
     mediaUrl?: string;
     mimetype?: string;
     args?: string;
@@ -14,14 +19,22 @@ export interface ResolvedInput {
   modifier?: string;
 }
 
+function quotedLabel(mimetype?: string): string {
+  if (mimetype?.startsWith('video')) return 'Video';
+  if (mimetype?.startsWith('image')) return 'Foto';
+  return 'File';
+}
+
 export class InputResolver {
   resolve(msg: {
     command: string;
     args: string;
-    reply?: { body?: string; media?: { url?: string; mimetype?: string } };
+    reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
+    senderName?: string;
+    senderId?: string;
   }): ResolvedInput | null {
-    const { command, args, reply, media } = msg;
+    const { command, args, reply, media, senderName, senderId } = msg;
     const commandName = command.replace(/^!/, '').toLowerCase();
 
     if (commandName === 'toimg') {
@@ -42,8 +55,23 @@ export class InputResolver {
         }
         return { type: 'image', source: 'reply', content: { mediaUrl: reply.media.url, mimetype: reply.media.mimetype, args } };
       }
+      // Reply teks + ada args: args jadi isi, pesan reply jadi quote.
+      // Reply teks tanpa args: isi pesan reply yang dijadikan stiker bubble.
+      const quotedBody = reply.body || (reply.media ? quotedLabel(reply.media.mimetype) : '');
+      if (args) {
+        return {
+          type: 'text', source: 'reply',
+          content: {
+            text: args, args, senderName, senderId,
+            quotedSenderName: reply.senderName, quotedSenderId: reply.senderId, quotedBody,
+          },
+        };
+      }
       if (reply.body) {
-        return { type: 'text', source: 'reply', content: { text: reply.body, args } };
+        return {
+          type: 'text', source: 'reply',
+          content: { text: reply.body, args, senderName: reply.senderName, senderId: reply.senderId },
+        };
       }
     }
 
@@ -57,7 +85,7 @@ export class InputResolver {
 
     // Priority 3: Direct text
     if (args) {
-      return { type: 'text', source: 'direct', content: { text: args, args } };
+      return { type: 'text', source: 'direct', content: { text: args, args, senderName, senderId } };
     }
 
     return null;

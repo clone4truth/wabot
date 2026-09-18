@@ -1,5 +1,5 @@
 import { StickerResult } from './result';
-import { TextStickerProcessor } from './processors/text.processor';
+import { BubbleProcessor } from './processors/bubble.processor';
 import { ImageStickerProcessor } from './processors/image.processor';
 import { VideoStickerProcessor } from './processors/video.processor';
 import { ToImageProcessor } from './processors/toimg.processor';
@@ -15,7 +15,7 @@ import { ErrorCode } from '../errors/error-codes';
 export class StickerService {
   private inputResolver = new InputResolver();
   private processors = {
-    text: new TextStickerProcessor(),
+    text: new BubbleProcessor(),
     image: new ImageStickerProcessor(),
     video: new VideoStickerProcessor(),
     toimg: new ToImageProcessor(),
@@ -25,14 +25,15 @@ export class StickerService {
   async process(normalizedMessage: {
     command: string;
     args: string;
-    reply?: { body?: string; media?: { url?: string; mimetype?: string } };
+    reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     chatId: string;
     senderId: string;
+    senderName?: string;
     isGroup: boolean;
   }): Promise<StickerResult | null> {
-    const { command, args, reply, media, chatId } = normalizedMessage;
-    const input = this.inputResolver.resolve({ command, args, reply, media });
+    const { command, args, reply, media, senderName, senderId } = normalizedMessage;
+    const input = this.inputResolver.resolve({ command, args, reply, media, senderName, senderId });
 
     if (!input) {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Unsupported input type');
@@ -54,8 +55,12 @@ export class StickerService {
     const content = input.content;
 
     switch (input.type) {
-      case 'text':
-        return this.processors.text.process(content.text ?? '', input.modifier);
+      case 'text': {
+        const quoted = content.quotedBody
+          ? { senderName: content.quotedSenderName || '?', senderId: content.quotedSenderId, body: content.quotedBody }
+          : undefined;
+        return this.processors.text.process(content.text ?? '', content.senderName, content.senderId, quoted);
+      }
       case 'image': {
         if (!content.mediaUrl) {
           throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');

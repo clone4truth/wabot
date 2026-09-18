@@ -9,6 +9,7 @@ export interface WahaMessage {
   timestamp: number;
   body: string;
   from: string;
+  notifyName?: string;
   hasMedia?: boolean;
   media?: {
     url: string;
@@ -19,12 +20,15 @@ export interface WahaMessage {
   replyTo?: {
     id: string;
     body?: string;
+    sender?: string;
+    senderName?: string;
     hasMedia?: boolean;
     media?: {
       url: string;
       mimetype: string;
     };
   };
+  _data?: any;
 }
 
 export interface NormalizedMessage {
@@ -32,6 +36,7 @@ export interface NormalizedMessage {
   messageId: string;
   chatId: string;
   senderId: string;
+  senderName: string;
   participantId?: string;
   isGroup: boolean;
   fromMe: boolean;
@@ -43,6 +48,8 @@ export interface NormalizedMessage {
   reply?: {
     messageId: string;
     body?: string;
+    senderId?: string;
+    senderName?: string;
     media?: {
       url: string;
       mimetype: string;
