@@ -1,9 +1,14 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import fetch from 'node-fetch';
 import env from '../config/env';
+import { logger } from '../observability/logger';
+
+let cachedWahaStatus = 'unknown';
+let lastCheck = 0;
+const CHECK_INTERVAL_MS = 30_000;
 
 export async function healthController(_req: FastifyRequest, reply: FastifyReply) {
-  const wahaOk = await checkWAHA();
+  const wahaOk = await checkWAHACached();
   const overall = wahaOk ? 'ok' : 'degraded';
 
   return reply.status(wahaOk ? 200 : 503).send({
@@ -15,10 +20,20 @@ export async function healthController(_req: FastifyRequest, reply: FastifyReply
   });
 }
 
+async function checkWAHACached(): Promise<boolean> {
+  const now = Date.now();
+  if (now - lastCheck < CHECK_INTERVAL_MS && cachedWahaStatus !== 'unknown') {
+    return cachedWahaStatus === 'connected';
+  }
+  lastCheck = now;
+  cachedWahaStatus = await checkWAHA() ? 'connected' : 'unreachable';
+  return cachedWahaStatus === 'connected';
+}
+
 async function checkWAHA(): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`${env.wahaBaseUrl}/api/sendText/default`, {
       method: 'POST',
       signal: controller.signal,

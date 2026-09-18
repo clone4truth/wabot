@@ -32,20 +32,20 @@ commandRouter.register('togif', createTogifHandler(stickerService));
 
 export async function webhookController(request: FastifyRequest, reply: FastifyReply) {
   const startTime = Date.now();
-  const rawBody = (request as any).rawBody?.toString() || JSON.stringify(request.body);
-  const body = rawBody;
+  const body = JSON.stringify(request.body);
 
   try {
     verifier.validateBodySize(body);
-    const sigHeader = Array.isArray(request.headers['x-hub-signature-256']) ? request.headers['x-hub-signature-256'][0] : (request.headers['x-hub-signature-256'] || '');
+
+    const sigHeader = (request.headers['x-hub-signature-256'] as string | undefined) || '';
     const verifyResult = verifier.verify(body, sigHeader);
+
     if (!verifyResult.valid) {
-      logger.warn('Invalid webhook signature — debug details', {
+      logger.warn('Invalid webhook signature', {
         requestId: request.id,
-        rawBody: body.slice(0, 200),
-        sigHeader: sigHeader ? sigHeader.slice(0, 20) : '(empty)',
-        expectedPrefix: verifyResult.expected ? verifyResult.expected.slice(0, 20) : 'N/A',
-        receivedPrefix: verifyResult.received ? verifyResult.received.slice(0, 20) : 'N/A',
+        sigHeader: sigHeader.slice(0, 20),
+        expectedPrefix: verifyResult.expected?.slice(0, 20) || 'N/A',
+        receivedPrefix: verifyResult.received?.slice(0, 20) || 'N/A',
         bodyLength: body.length,
         hmacKeySet: !!env.wahaWebhookHmacKey,
       });
@@ -60,11 +60,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 
     const message = normalizer.normalize(payload);
 
-    if (normalizer.shouldIgnore(message)) {
-      return reply.code(200).send({ status: 'ok' });
-    }
-
-    if (message.fromMe) {
+    if (normalizer.shouldIgnore(message) || message.fromMe) {
       return reply.code(200).send({ status: 'ok' });
     }
 
@@ -104,13 +100,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     }
 
     if (result && result.buffer) {
-      if (parsed.name === 'toimg') {
-        await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
-      } else if (parsed.name === 'togif') {
-        await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
-      } else {
-        await wahaClient.sendSticker(message.chatId, result.buffer);
-      }
+      await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
     } else if (parsed.name === 'menu') {
       await wahaClient.sendText(message.chatId, handleMenu());
     } else if (parsed.name === 'help') {
@@ -120,12 +110,11 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`);
     }
 
-    const duration = Date.now() - startTime;
     logger.info('Webhook processed', {
       requestId: request.id,
       messageIdHash: message.messageId,
       command: parsed.name,
-      processingDurationMs: duration,
+      processingDurationMs: Date.now() - startTime,
       success: true,
     });
 

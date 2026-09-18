@@ -8,11 +8,8 @@ export class WebhookVerifier {
     if (!env.wahaWebhookHmacKey) {
       return { valid: true };
     }
-    const expected = crypto
-      .createHmac('sha256', env.wahaWebhookHmacKey)
-      .update(body)
-      .digest('hex');
 
+    const expected = crypto.createHmac('sha256', env.wahaWebhookHmacKey).update(body).digest('hex');
     const sig = signature.replace(/^sha256=/, '');
 
     if (sig.length !== expected.length) {
