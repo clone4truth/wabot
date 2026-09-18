@@ -15,3 +15,12 @@ export function getDefaultFontPath(): string {
   if (fonts.length > 0) return fonts[0];
   return '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
 }
+
+// Nama family font untuk atribut font_desc Pango (bukan path file).
+export function getFontFamily(fontPath?: string): string {
+  const p = (fontPath || getDefaultFontPath()).toLowerCase();
+  if (p.includes('noto')) return 'Noto Sans';
+  if (p.includes('dejavu')) return 'DejaVu Sans';
+  if (p.includes('lato')) return 'Lato';
+  return 'sans';
+}

@@ -1,4 +1,4 @@
-import { getDefaultFontPath } from './fonts';
+import { getDefaultFontPath, getFontFamily } from './fonts';
 import Sharp from 'sharp';
 
 export interface TextLayoutOptions {
@@ -11,6 +11,12 @@ export interface TextLayoutOptions {
   outlineColor?: string;
   outlineWidth?: number;
   align?: 'left' | 'center' | 'right';
+}
+
+// Escape karakter khusus XML agar teks user tidak merusak markup Pango
+// (mis. "&", "<", ">" pada "!stiker a & b" atau "<3").
+export function escapePangoMarkup(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Buffer> {
@@ -26,13 +32,17 @@ export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Bu
   } = options;
 
   const fontPath = getDefaultFontPath();
+  const family = getFontFamily(fontPath);
 
-  const pangoMarkup = `<span font="${fontPath}" font-size="${fontSize}" foreground="${color}" stroke="${outlineColor}" stroke-width="${outlineWidth}">${text}</span>`;
+  // Hanya atribut Pango yang valid: font_desc + foreground.
+  // "stroke"/"stroke-width" bukan atribut Pango -> menyebabkan "invalid markup".
+  const pangoMarkup = `<span font_desc="${family} ${fontSize}" foreground="${color}">${escapePangoMarkup(text)}</span>`;
 
   const overlay = {
     text: {
       text: pangoMarkup,
-      font: fontPath,
+      font: family,
+      fontfile: fontPath,
       width: maxWidth,
       height: maxHeight,
       align,
