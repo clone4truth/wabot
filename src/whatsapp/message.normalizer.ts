@@ -11,25 +11,29 @@ export class MessageNormalizer {
   normalize(payload: WAHAPayload): NormalizedMessage {
     const msg: WahaMessage = payload.payload;
     const reply = msg.replyTo;
+    const isGroup = msg.from.includes('g.us');
+
+    // Di grup, pengirim ada di participant; di DM pengirim = from.
+    const senderId = msg.participant || msg.from;
 
     const normalized: NormalizedMessage = {
       eventId: `${payload.session}_${payload.payload.id}`,
       messageId: msg.id,
       chatId: msg.from,
-      senderId: msg.from,
-      senderName: MessageNormalizer.displayName(msg.notifyName || msg._data?.notifyName, msg.from),
-      isGroup: msg.from.includes('g.us'),
+      senderId,
+      senderName: MessageNormalizer.displayName(msg.notifyName || msg._data?.notifyName, senderId),
+      isGroup,
       fromMe: false,
       body: msg.body || '',
     };
 
     if (reply) {
+      const quoted = MessageNormalizer.resolveReplySender(msg, reply, isGroup);
       normalized.reply = {
         messageId: reply.id,
         body: reply.body,
-        senderId: reply.sender,
-        senderName: reply.senderName
-          || MessageNormalizer.displayName((reply as any).notifyName, reply.sender || 'W'),
+        senderId: quoted.id,
+        senderName: quoted.name,
         media: reply.media,
       };
     }
@@ -42,6 +46,32 @@ export class MessageNormalizer {
     }
 
     return normalized;
+  }
+
+  // Cari pengirim pesan yang di-quote:
+  // 1. replyTo.participant (field resmi WAHA, bisa absen tergantung engine),
+  // 2. prefix replyTo.id: "true_" = dari bot sendiri, "false_" = dari lawan chat (DM),
+  // 3. fallback "?" daripada nama ngawur.
+  static resolveReplySender(
+    msg: WahaMessage,
+    reply: NonNullable<WahaMessage['replyTo']>,
+    isGroup: boolean,
+  ): { id?: string; name: string } {
+    const participant = reply.participant || reply.sender;
+    const rawNotify = reply.senderName || (reply as any)._data?.notifyName;
+    if (participant) {
+      return { id: participant, name: rawNotify || MessageNormalizer.displayName(undefined, participant) };
+    }
+    if (!isGroup) {
+      if (reply.id?.startsWith('true_')) {
+        const meId = msg.to || 'bot';
+        return { id: meId, name: MessageNormalizer.displayName(undefined, meId) };
+      }
+      if (reply.id?.startsWith('false_')) {
+        return { id: msg.from, name: MessageNormalizer.displayName(msg.notifyName || msg._data?.notifyName, msg.from) };
+      }
+    }
+    return { id: undefined, name: rawNotify || '?' };
   }
 
   shouldIgnore(msg: NormalizedMessage): boolean {

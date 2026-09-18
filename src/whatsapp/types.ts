@@ -9,6 +9,8 @@ export interface WahaMessage {
   timestamp: number;
   body: string;
   from: string;
+  to?: string;
+  participant?: string;
   notifyName?: string;
   hasMedia?: boolean;
   media?: {
@@ -20,6 +22,7 @@ export interface WahaMessage {
   replyTo?: {
     id: string;
     body?: string;
+    participant?: string;
     sender?: string;
     senderName?: string;
     hasMedia?: boolean;
