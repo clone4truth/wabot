@@ -1,23 +1,29 @@
+import { COMMAND_REGISTRY } from './metadata';
+
 export function handleMenu(): string {
-  return [
-    '📋 *DAFTAR COMMAND*:',
+  const categories = [
+    { key: 'Sticker', label: '🎨 *Sticker*' },
+    { key: 'Effects', label: '✨ *Effects*' },
+    { key: 'Text', label: '📝 *Text*' },
+    { key: 'Animation', label: '🎬 *Animation*' },
+    { key: 'Creative', label: '🚀 *Creative Studio*' },
+    { key: 'Utility', label: '⚙️ *Utility*' },
+  ];
+
+  const lines: string[] = [
+    '✨ *WHATSAPP STICKER STUDIO* ✨',
     '',
-    '!stiker <teks> — Buat stiker teks',
-    '!stiker teks <teks> — Paksa mode teks',
-    '!stiker quote — Stiker quote (reply teks)',
-    '!stiker bubble — Stiker bubble (reply teks)',
-    '!stiker full — Stiker foto full (reply/kirim foto)',
-    '!stiker crop — Stiker foto crop (reply/kirim foto)',
-    '!stiker circle — Stiker foto bulat (reply/kirim foto)',
-    '!stiker meme <atas> | <bawah> — Stiker meme (reply/kirim foto)',
-    '!ttp <teks> — Stiker teks warna-warni',
-    '!attp <teks> — Stiker teks animasi',
-    '!stiker — Otomatis deteksi input media/teks',
-    '!toimg — Konversi stiker statis ke gambar',
-    '!togif — Konversi stiker animasi ke video',
-    '!prefix — Lihat/ubah prefix chat',
-    '!help — Bantuan penggunaan',
-    '!menu — Tampilkan daftar ini',
-    '!ping — Cek status bot',
-  ].join('\n');
+  ];
+
+  for (const cat of categories) {
+    lines.push(cat.label);
+    const items = COMMAND_REGISTRY.filter((c) => c.category === cat.key);
+    for (const item of items) {
+      lines.push(`  • \`${item.usage}\` — ${item.description}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('💡 _Ketik `!help <topik>` untuk panduan detail (contoh: `!help effects`, `!help removebg`)_');
+  return lines.join('\n');
 }

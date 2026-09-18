@@ -4,7 +4,22 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 
 export interface ResolvedInput {
-  type: 'text' | 'image' | 'video' | 'toimg' | 'togif' | 'ttp' | 'attp' | 'meme';
+  type:
+    | 'text'
+    | 'image'
+    | 'video'
+    | 'toimg'
+    | 'togif'
+    | 'ttp'
+    | 'attp'
+    | 'meme'
+    | 'template'
+    | 'emoji'
+    | 'badge'
+    | 'caption'
+    | 'removebg'
+    | 'subject'
+    | 'outline';
   source: 'reply' | 'media' | 'direct';
   content: {
     text?: string;
@@ -17,12 +32,18 @@ export interface ResolvedInput {
     mimetype?: string;
     args?: string;
     command?: string;
+    [key: string]: unknown;
   };
   modifier?: string;
+  options?: Record<string, unknown>;
 }
 
 const TEXT_MODIFIERS = ['teks', 'quote', 'bubble'];
-const IMAGE_MODIFIERS = ['full', 'crop', 'circle', 'meme'];
+const IMAGE_MODIFIERS = [
+  'full', 'crop', 'circle', 'meme',
+  'blur', 'grayscale', 'sepia', 'invert', 'pixel', 'sharpen', 'shadow',
+  'removebg', 'subject', 'outline', 'caption',
+];
 
 function quotedLabel(mimetype?: string): string {
   if (mimetype?.startsWith('video')) return 'Video';
@@ -35,12 +56,13 @@ export class InputResolver {
     command: string;
     args: string;
     modifier?: string;
+    options?: Record<string, unknown>;
     reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     senderName?: string;
     senderId?: string;
   }): ResolvedInput | null {
-    const { command, args, modifier, reply, media, senderName, senderId } = msg;
+    const { command, args, modifier, options, reply, media, senderName, senderId } = msg;
     const commandName = command.replace(/^!/, '').toLowerCase();
 
     if (commandName === 'toimg') {
@@ -67,13 +89,28 @@ export class InputResolver {
       return { type: 'togif', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
     }
 
+    if (commandName === 'emoji') {
+      const text = args || reply?.body || '';
+      return { type: 'emoji', source: args ? 'direct' : 'reply', content: { text } };
+    }
+
+    if (commandName === 'badge') {
+      const text = args || reply?.body || '';
+      return { type: 'badge', source: args ? 'direct' : 'reply', content: { text } };
+    }
+
     if (commandName !== 'stiker' && commandName !== 'ttp' && commandName !== 'attp') return null;
 
     // Text-to-Picture (statis) & Animated-TTP: !ttp / !attp <teks> (atau reply teks).
     if (commandName === 'ttp' || commandName === 'attp') {
       const inputText = args || reply?.body || '';
       if (!inputText) return null;
-      return { type: commandName, source: args ? 'direct' : 'reply', content: { text: inputText, args } };
+      return {
+        type: commandName,
+        source: args ? 'direct' : 'reply',
+        content: { text: inputText, args },
+        options,
+      };
     }
 
     // Command: !stiker
@@ -153,7 +190,23 @@ export class InputResolver {
       );
     }
 
-    // P0: Image-only modifiers (full, crop, circle, meme)
+    if (modifier === 'template') {
+      const templateName = (options?.template as string) || '';
+      return {
+        type: 'template',
+        source: reply ? 'reply' : (args ? 'direct' : 'media'),
+        modifier: 'template',
+        options,
+        content: {
+          text: args || reply?.body || '',
+          mediaUrl: (reply?.media?.url || media?.url),
+          template: templateName,
+          args,
+        },
+      };
+    }
+
+    // P0: Image-only modifiers (full, crop, circle, meme, effects, creative)
     if (modifier && IMAGE_MODIFIERS.includes(modifier)) {
       if (hasVideoMedia) {
         throw new AppError(
@@ -178,10 +231,37 @@ export class InputResolver {
           content: { mediaUrl: targetMedia.url, mimetype: targetMedia.mimetype, args },
         };
       }
+      if (modifier === 'removebg' || modifier === 'subject' || modifier === 'outline') {
+        return {
+          type: modifier,
+          source: isReply ? 'reply' : 'media',
+          modifier,
+          options,
+          content: { mediaUrl: targetMedia.url, mimetype: targetMedia.mimetype, text: args, args },
+        };
+      }
+      if (modifier === 'caption') {
+        const captionText = args || (reply && !reply.media ? reply.body : '') || '';
+        if (!captionText) {
+          throw new AppError(
+            ErrorCode.INVALID_ARGUMENT,
+            'Mode caption membutuhkan teks',
+            { userMessage: '❌ Mode caption membutuhkan teks.' },
+          );
+        }
+        return {
+          type: 'caption',
+          source: isReply ? 'reply' : 'media',
+          modifier: 'caption',
+          options,
+          content: { mediaUrl: targetMedia.url, mimetype: targetMedia.mimetype, text: captionText, args },
+        };
+      }
       return {
         type: 'image',
         source: isReply ? 'reply' : 'media',
         modifier,
+        options,
         content: { mediaUrl: targetMedia.url, mimetype: targetMedia.mimetype, args },
       };
     }

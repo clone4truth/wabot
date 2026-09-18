@@ -87,6 +87,86 @@ describe('Command Parser', () => {
     const result = parseCommand('!help');
     expect(result?.name).toBe('help');
   });
+
+  it('parses image effects', () => {
+    const blur = parseCommand('!stiker blur');
+    expect(blur?.modifier).toBe('blur');
+
+    const pixel = parseCommand('!stiker pixel');
+    expect(pixel?.modifier).toBe('pixel');
+
+    const sepia = parseCommand('!stiker sepia');
+    expect(sepia?.modifier).toBe('sepia');
+  });
+
+  it('parses removebg, subject, outline', () => {
+    const rmbg = parseCommand('!stiker removebg');
+    expect(rmbg?.modifier).toBe('removebg');
+
+    const subj = parseCommand('!stiker subject');
+    expect(subj?.modifier).toBe('subject');
+
+    const outDefault = parseCommand('!stiker outline');
+    expect(outDefault?.modifier).toBe('outline');
+    expect(outDefault?.options).toEqual({ color: 'white' });
+
+    const outBlack = parseCommand('!stiker outline black');
+    expect(outBlack?.modifier).toBe('outline');
+    expect(outBlack?.options).toEqual({ color: 'black' });
+  });
+
+  it('parses caption mode and text', () => {
+    const capDef = parseCommand('!stiker caption Halo dunia');
+    expect(capDef?.modifier).toBe('caption');
+    expect(capDef?.options).toEqual({ position: 'bottom' });
+    expect(capDef?.args).toBe('Halo dunia');
+
+    const capTop = parseCommand('!stiker caption top Judul Atas');
+    expect(capTop?.modifier).toBe('caption');
+    expect(capTop?.options).toEqual({ position: 'top' });
+    expect(capTop?.args).toBe('Judul Atas');
+  });
+
+  it('parses template modifier', () => {
+    const tpl = parseCommand('!stiker template terminal npm test');
+    expect(tpl?.modifier).toBe('template');
+    expect(tpl?.options).toEqual({ template: 'terminal' });
+    expect(tpl?.args).toBe('npm test');
+  });
+
+  it('parses !ttp style vs literal text', () => {
+    const ttpStyle = parseCommand('!ttp style gold Hello');
+    expect(ttpStyle?.name).toBe('ttp');
+    expect(ttpStyle?.options).toEqual({ style: 'gold' });
+    expect(ttpStyle?.args).toBe('Hello');
+
+    const ttpLiteral = parseCommand('!ttp gold Hello');
+    expect(ttpLiteral?.name).toBe('ttp');
+    expect(ttpLiteral?.options).toBeUndefined();
+    expect(ttpLiteral?.args).toBe('gold Hello');
+  });
+
+  it('parses !attp effect vs literal text', () => {
+    const attpEffect = parseCommand('!attp effect fade Hello');
+    expect(attpEffect?.name).toBe('attp');
+    expect(attpEffect?.options).toEqual({ effect: 'fade' });
+    expect(attpEffect?.args).toBe('Hello');
+
+    const attpLiteral = parseCommand('!attp fade Hello');
+    expect(attpLiteral?.name).toBe('attp');
+    expect(attpLiteral?.options).toBeUndefined();
+    expect(attpLiteral?.args).toBe('fade Hello');
+  });
+
+  it('parses !emoji and !badge commands', () => {
+    const emoji = parseCommand('!emoji 😂');
+    expect(emoji?.name).toBe('emoji');
+    expect(emoji?.args).toBe('😂');
+
+    const badge = parseCommand('!badge ONLINE');
+    expect(badge?.name).toBe('badge');
+    expect(badge?.args).toBe('ONLINE');
+  });
 });
 
 describe('isCommand', () => {

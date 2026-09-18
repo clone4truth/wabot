@@ -19,6 +19,8 @@ export enum ErrorCode {
   INVALID_MODIFIER_INPUT = 'INVALID_MODIFIER_INPUT',
   MODIFIER_REQUIRES_IMAGE = 'MODIFIER_REQUIRES_IMAGE',
   MODIFIER_REQUIRES_TEXT = 'MODIFIER_REQUIRES_TEXT',
+  FEATURE_DISABLED = 'FEATURE_DISABLED',
+  INVALID_ARGUMENT = 'INVALID_ARGUMENT',
 }
 
 export const userMessages: Record<ErrorCode, string> = {
@@ -40,6 +42,8 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.INVALID_MODIFIER_INPUT]: '❌ Modifier tidak didukung untuk input ini.',
   [ErrorCode.MODIFIER_REQUIRES_IMAGE]: '❌ Mode ini membutuhkan foto.',
   [ErrorCode.MODIFIER_REQUIRES_TEXT]: '❌ Mode ini membutuhkan teks.',
+  [ErrorCode.FEATURE_DISABLED]: '❌ Fitur remove background belum tersedia.',
+  [ErrorCode.INVALID_ARGUMENT]: '❌ Argumen perintah tidak valid.',
 };
 
 // Pesan user dinamis: limit configurable tercermin di respons (bukan hardcode).

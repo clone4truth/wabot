@@ -14,6 +14,8 @@ import { createTogifHandler } from '../commands/togif.handler';
 import { handleMenu } from '../commands/menu.handler';
 import { handleHelp } from '../commands/help.handler';
 import { handlePing } from '../commands/ping.handler';
+import { handleTemplateCommand } from '../commands/template.handler';
+import { handleJobCommand } from '../commands/job.handler';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AccessGuard } from '../security/access';
 import { AppError } from '../errors/app-error';
@@ -37,6 +39,8 @@ commandRouter.register('ttp', createTtpHandler(stickerService));
 commandRouter.register('attp', createAttpHandler(stickerService));
 commandRouter.register('toimg', createToimgHandler(stickerService));
 commandRouter.register('togif', createTogifHandler(stickerService));
+commandRouter.register('emoji', createStikerHandler(stickerService));
+commandRouter.register('badge', createStikerHandler(stickerService));
 
 export async function webhookController(request: FastifyRequest, reply: FastifyReply) {
   const startTime = Date.now();
@@ -173,7 +177,13 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
       await wahaClient.sendText(message.chatId, handleMenu(), replyTo);
       break;
     case 'help':
-      await wahaClient.sendText(message.chatId, handleHelp(), replyTo);
+      await wahaClient.sendText(message.chatId, handleHelp(parsed.args), replyTo);
+      break;
+    case 'template':
+      await wahaClient.sendText(message.chatId, handleTemplateCommand(parsed), replyTo);
+      break;
+    case 'job':
+      await wahaClient.sendText(message.chatId, handleJobCommand(message.senderId), replyTo);
       break;
     case 'ping':
       const ping = handlePing();

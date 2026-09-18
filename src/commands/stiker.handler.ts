@@ -11,12 +11,14 @@ export function createStikerHandler(stickerService: StickerService) {
         command: `!${command.name}`,
         args: command.args,
         modifier: command.modifier,
+        options: command.options,
         reply: message.reply,
         media: message.media,
         chatId: message.chatId,
         senderId: message.senderId,
         senderName: message.senderName,
         isGroup: message.isGroup,
+        session: message.session,
       });
 
       if (!result) {

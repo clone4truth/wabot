@@ -20,7 +20,24 @@ WAHA Sticker Bot adalah bot WhatsApp berbasis modular monolith untuk pembuatan d
 WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 → AccessGuard → CommandParser → IdempotencyGuard.tryStart (atomic)
 → RateLimiter (user + group) → CommandRouter
-→ InputResolver → StickerProcessor → Result (+EXIF pack) → WAHAClient → WhatsApp
+→ InputResolver → StickerService (Facade)
+→ GeneratorRegistry → StickerGenerator
+  ├── TextGenerator
+  ├── ImageGenerator (+ EffectRegistry)
+  ├── VideoGenerator
+  ├── MemeGenerator
+  ├── TtpGenerator (+ TextStyleRegistry)
+  ├── AttpGenerator (+ AnimationRegistry)
+  ├── TemplateGenerator (+ TemplateRegistry)
+  ├── EmojiGenerator
+  ├── BadgeGenerator
+  ├── CaptionGenerator
+  ├── RemoveBgGenerator (+ BackgroundRemovalService)
+  ├── ToImageGenerator
+  └── ToGifGenerator
+→ JobManager (image, video, animation, background queues)
+→ Media Pipeline (Sharp / FFmpeg)
+→ Result (+EXIF pack) → WAHAClient → WhatsApp
 ```
 
 ## Component Responsibilities
@@ -39,68 +56,30 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **WebhookVerifier**: HMAC signature verification, body size validation
 - **MessageNormalizer**: Mengubah payload WAHA menjadi NormalizedMessage
 
-### Layer 3: Security
+### Layer 3: Security & Job Management
 - **MemoryRateLimiter**: In-memory rate limiting per user (8/mnt) + per group (30/mnt)
 - **IdempotencyGuard**: In-memory TTL cache dengan atomic `tryStart(key)` (state PROCESSING/DONE)
+- **JobManager**: In-process bounded queue manager dengan kuota konkurensi global terisolasi (`MAX_IMAGE_JOBS`, `MAX_VIDEO_JOBS`, `MAX_ANIMATION_JOBS`, `MAX_BACKGROUND_JOBS`) serta isolasi state per pengguna.
 - **SSRF Protection**: Exact WAHA origin allowlist + validasi redirect pada MediaDownloader
 
-### Layer 4: Core Business Logic
-- **StickerService**: Facade untuk semua sticker processors; concurrency slot release terikat pada terminasi proses sebenarnya
-- **InputResolver**: Menentukan sumber input berdasarkan priority (reply → media → text)
-- **CommandParser**: Parsing command prefix dan argument
-- **CommandRouter**: Mapping command ke handler
+### Layer 4: Generator Platform & Registries
+- **StickerService**: Facade orchestrator yang mendelegasikan eksekusi stiker ke `GeneratorRegistry` dan `JobManager`.
+- **GeneratorRegistry**: Plugin registry deterministik untuk `StickerGenerator` tanpa silent fallback.
+- **EffectRegistry**: Engine efek gambar non-destruktif Sharp (`blur`, `grayscale`, `sepia`, `invert`, `pixel`, `sharpen`, `shadow`).
+- **TemplateRegistry**: Template card engine berbasis SVG (`terminal`, `breaking`, `wanted`, `minimal`).
+- **TextStyleRegistry**: Preset gaya visual teks adaptif untuk TTP (`gradient`, `minimal`, `dark`, `terminal`, `gold`, `neon`).
+- **AnimationRegistry**: Preset animasi berbingkai SVG untuk ATTP (`rainbow`, `fade`, `zoom`, `blink`, `slide`, `bounce`).
+- **BackgroundRemovalService**: Abstraksi provider background removal swappable (`disabled`, `local`, `api`) dengan kendali konkurensi mandiri (`BACKGROUND_REMOVAL_CONCURRENCY`).
 
-### Layer 5: Processors
-- **TextStickerProcessor**: Plain sticker teks dengan SVG + Sharp rendering
-- **ImageStickerProcessor**: Image → WebP (full/crop/circle)
-- **VideoStickerProcessor**: Video → Animated WebP (H.264/WebP, single deadline ownership)
-- **MemeProcessor**: Image dengan teks atas/bawah
-- **QuoteProcessor**: Desain quote card
-- **BubbleProcessor**: Chat bubble style
-- **ToImageProcessor**: Static sticker → PNG
-- **ToGifProcessor**: Animated sticker → MP4 (H.264/libx264, yuv420p, +faststart, ffprobe codec validation)
-- **TtpProcessor**: Text-to-Picture sticker dengan gradien
-- **AttpProcessor**: Animated Text-to-Picture sticker dengan frame pelangi
+### Layer 5: Creative Tools
+- **EmojiGenerator**: Render emoji besar 1-4 grapheme dengan fallback font aman tanpa tofu/clipping.
+- **BadgeGenerator**: Badge status server/grup WhatsApp modern (`ONLINE`, `OFFLINE`, `LIVE`, `ERROR`, `SUCCESS`).
+- **CaptionGenerator**: Image captioning adaptif (`top`, `bottom`, `overlay`).
+- **BatchStickerService**: Pondasi pemrosesan multi-media dengan konkurensi terkendali dan ordering terjamin.
 
-### Layer 6: Media
+### Layer 6: Media & Rendering
 - **MediaDownloader**: Download media dari exact WAHA origin (redirect tervalidasi), size cap streaming
 - **Validator**: MIME signature, file size, content validation
 - **FFmpeg**: Video metadata, standardized runner dengan timeout dan graceful SIGKILL
 - **TempFiles**: Create, cleanup, orphan cleanup
-
-### Layer 7: Rendering
-- **TextLayout**: SVG text rendering + outline paint-order + adaptive fitted sizing dengan validasi 2-level (logical layout bounds + actual rendered pixel trim bounds).
-- **TextUtils**: Grapheme-safe Unicode processing via `Intl.Segmenter` (cluster-safe counting, slicing, dan word-wrapping tanpa silent truncation). Batas teks ditegakkan berdasarkan user-perceived characters (grapheme clusters), bukan raw UTF-16 code units.
-- **Fonts**: DejaVu + Noto + Noto Emoji (fontconfig fallback)
-
-## Configuration
-
-Semua konfigurasi melalui environment variables di `.env`:
-- WAHA connection (URL, API key, session)
-- Rate limits (per user, per group)
-- Resource limits (text, image, video)
-- Processing timeouts
-- Temp file management
-
-## Error Handling
-
-- `AppError` dengan stable `ErrorCode`
-- User-facing messages dalam Bahasa Indonesia
-- Internal error codes untuk correlation
-- Structured JSON logging (tanpa raw phone numbers/messages)
-
-## Testing
-
-- **Unit Tests**: Parser, rate limiter, idempotency, validator, error codes
-- **Integration Tests**: Mock WAHA webhook scenarios
-- **E2E Tests**: Real WAHA session testing
-
-## Milestones
-
-1. Foundation (config, WAHA client, webhook, parser/router)
-2. Text Sticker
-3. Image Sticker
-4. Video Sticker
-5. Conversion Utilities (!toimg, !togif)
-6. Protection (rate limit, idempotency, cleanup, logging)
-7. E2E & Release
+- **TextLayout & TextUtils**: Grapheme cluster handling via `Intl.Segmenter` dan adaptive font fitting.

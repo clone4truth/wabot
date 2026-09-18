@@ -8,12 +8,14 @@ export function createAttpHandler(stickerService: StickerService) {
     const result = await stickerService.process({
       command: '!attp',
       args: command.args,
+      options: command.options,
       reply: message.reply,
       media: message.media,
       chatId: message.chatId,
       senderId: message.senderId,
       senderName: message.senderName,
       isGroup: message.isGroup,
+      session: message.session,
     });
 
     if (!result) {

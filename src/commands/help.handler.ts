@@ -1,31 +1,58 @@
-export function handleHelp(): string {
+import { COMMAND_REGISTRY, findCommand, getCommandsByCategory } from './metadata';
+
+export function handleHelp(topic?: string): string {
+  const cleanTopic = topic?.trim().toLowerCase().replace(/^!/, '');
+
+  if (cleanTopic) {
+    // Check if it's a category
+    const categoryMatches = getCommandsByCategory(cleanTopic);
+    if (categoryMatches.length > 0) {
+      const lines = [`📖 *Panduan Kategori: ${cleanTopic.toUpperCase()}*\n`];
+      for (const cmd of categoryMatches) {
+        lines.push(`• *${cmd.usage}*\n  ${cmd.description}\n`);
+      }
+      return lines.join('\n');
+    }
+
+    // Check if it's a specific command
+    const cmd = findCommand(cleanTopic);
+    if (cmd) {
+      return [
+        `📖 *Bantuan Command: ${cmd.name}*`,
+        '',
+        `*Penggunaan:* \`${cmd.usage}\``,
+        `*Kategori:* ${cmd.category}`,
+        `*Penjelasan:* ${cmd.description}`,
+      ].join('\n');
+    }
+  }
+
   return [
-    '📖 *BANTUAN STIKER BOT*:',
+    '📖 *PANDUAN STIKER BOT*',
     '',
-    '• *Stiker Teks*:',
-    '  !stiker <teks> → Buat stiker teks polos',
-    '  !stiker teks <teks> → Paksa mode teks (meski me-reply foto/video)',
-    '  Reply teks lalu !stiker quote → Stiker kutipan berbingkai nama',
-    '  Reply teks lalu !stiker bubble → Stiker bubble chat WhatsApp',
-    '  !ttp <teks> → Stiker teks dengan gradien warna',
-    '  !attp <teks> → Stiker teks animasi warna-warni',
+    '• *Stiker & Efek Media*:',
+    '  Reply/kirim foto lalu:',
+    '  - `!stiker full` (penuh) / `!stiker crop` (kotak) / `!stiker circle` (lingkaran)',
+    '  - Efek: `!stiker blur`, `!stiker grayscale`, `!stiker sepia`, `!stiker invert`, `!stiker pixel`, `!stiker sharpen`',
     '',
-    '• *Stiker Media*:',
-    '  Reply / kirim foto lalu !stiker → Stiker foto standar',
-    '  Reply / kirim foto lalu !stiker full → Stiker foto penuh (contain)',
-    '  Reply / kirim foto lalu !stiker crop → Stiker foto terpotong (cover)',
-    '  Reply / kirim foto lalu !stiker circle → Stiker foto bulat',
-    '  Reply / kirim foto lalu !stiker meme <atas> | <bawah> → Stiker meme',
-    '  Reply / kirim video (maks 10 dtk) lalu !stiker → Stiker video bergerak',
+    '• *Creative Studio*:',
+    '  - `!stiker removebg` → Hapus latar belakang foto',
+    '  - `!stiker subject` → Potong otomatis fokus ke subjek utama',
+    '  - `!stiker outline [white|black]` → Tambahkan garis tepi stiker',
+    '  - `!stiker caption [top|bottom|overlay] <teks>` → Tambahkan caption pada foto',
+    '  - `!stiker template <nama> <teks>` → Stiker bergaya template',
+    '  - `!emoji <emoji>` → Buat stiker besar dari 1-4 emoji',
+    '  - `!badge <STATUS>` → Stiker badge status keren',
+    '',
+    '• *Teks & Animasi*:',
+    '  - `!ttp <teks>` atau `!ttp style <preset> <teks>` (preset: gradient, gold, dark, terminal, neon, minimal)',
+    '  - `!attp <teks>` atau `!attp effect <preset> <teks>` (preset: rainbow, fade, zoom, blink, slide, bounce)',
+    '  - `!stiker quote` (kutipan nama) / `!stiker bubble` (chat WhatsApp)',
     '',
     '• *Konversi*:',
-    '  Reply stiker statis lalu !toimg → Ubah stiker jadi gambar',
-    '  Reply stiker bergerak lalu !togif → Ubah stiker jadi video',
+    '  - `!toimg` (reply stiker statis)',
+    '  - `!togif` (reply stiker animasi)',
     '',
-    '• *Pengaturan & Utilitas*:',
-    '  !prefix <simbol> → Ubah prefix bot (grup: khusus admin)',
-    '  !menu → Lihat daftar perintah',
-    '  !help → Bantuan penggunaan',
-    '  !ping → Cek status dan latensi bot',
+    '💡 Ketik `!help <topik>` (misal: `!help removebg` atau `!help effects`) untuk bantuan spesifik.',
   ].join('\n');
 }

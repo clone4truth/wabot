@@ -1,41 +1,34 @@
-# WAHA Sticker Bot
+# WAHA Sticker Bot — WhatsApp Sticker Studio
 
-Bot WhatsApp untuk pembuatan dan konversi stiker menggunakan WAHA (WhatsApp HTTP API).
+Bot WhatsApp modular untuk pembuatan dan konversi stiker tingkat lanjut menggunakan WAHA (WhatsApp HTTP API), Sharp, FFmpeg, dan Bounded Job Management.
 
-## Fitur
+## Fitur Unggulan
 
-- Buat stiker dari teks, gambar, dan video
-- Reply pesan lalu `!stiker` untuk mengubahnya jadi stiker
-- `!toimg` - Konversi sticker static ke gambar PNG
-- `!togif` - Konversi animated sticker ke video MP4
-- Rate limiting per user dan group
-- Idempotency webhook untuk mencegah duplicate
-- HMAC webhook verification
-- SSRF protection
-- Privacy-safe structured logging
+- **Generator Platform Modular**: Arsitektur plugin berbasis `GeneratorRegistry` tanpa god-class `switch/case`.
+- **Image Effect Engine**: Efek visual non-destruktif (`!stiker blur`, `grayscale`, `sepia`, `invert`, `pixel`, `sharpen`, `shadow`).
+- **Creative Tools Studio**:
+  - `!stiker removebg` — Hapus background foto menjadi transparan.
+  - `!stiker subject` — Smart crop otomatis memfokuskan objek utama dengan padding aman.
+  - `!stiker outline` — Beri garis tepi stiker (`white`, `black`, `gold`).
+  - `!stiker caption` — Tambahkan caption banner atas, bawah, atau overlay pada foto.
+  - `!stiker template` — Template kartu visual SVG (`terminal`, `breaking`, `wanted`, `minimal`).
+  - `!emoji` — Render emoji besar 1–4 grapheme cluster tanpa clipping/tofu.
+  - `!badge` — Stiker badge status bergaya modern (`ONLINE`, `OFFLINE`, `LIVE`, `ERROR`, `SUCCESS`).
+- **Advanced TTP & ATTP**:
+  - `!ttp style <preset> <teks>` — Preset: `gradient`, `minimal`, `dark`, `terminal`, `gold`, `neon`.
+  - `!attp effect <preset> <teks>` — Animasi multi-frame WebP: `rainbow`, `fade`, `zoom`, `blink`, `slide`, `bounce`.
+- **In-Process Bounded Job Management**: Alokasi kuota konkurensi global (`MAX_IMAGE_JOBS`, `MAX_VIDEO_JOBS`, `MAX_ANIMATION_JOBS`, `MAX_BACKGROUND_JOBS`) dengan isolasi status per pengguna via `!job`.
+- **Konversi Media**:
+  - `!toimg` — Konversi stiker statis ke gambar PNG.
+  - `!togif` — Konversi stiker bergerak ke video MP4 H.264.
+- **Keamanan & Privasi**: HMAC webhook, exact-origin SSRF protection, bounded temp cleanup, rate limiting, and zero sensitive chat logging.
 
-## Command
+Untuk dokumentasi lengkap perintah dan arsitektur, lihat:
+- [Panduan Command](file:///home/seno/Project/stikerbot/docs/commands.md)
+- [Arsitektur Generator System](file:///home/seno/Project/stikerbot/docs/generator-system.md)
+- [Dokumen Arsitektur Monolith](file:///home/seno/Project/stikerbot/docs/architecture.md)
 
-| Command | Deskripsi |
-|---------|-----------|
-| `!stiker <teks>` | Buat stiker teks |
-| `!stiker full` | Stiker image (full) |
-| `!stiker crop` | Stiker image (crop) |
-| `!stiker circle` | Stiker image (circle) |
-| `!stiker quote` | Stiker quote |
-| `!stiker bubble` | Stiker bubble |
-| `!stiker meme <atas> \| <bawah>` | Stiker meme |
-| `!stiker teks <teks>` | Paksa mode teks |
-| `!ttp <teks>` | Stiker teks gradien (ekstensi V1.1) |
-| `!attp <teks>` | Stiker teks animasi (ekstensi V1.1) |
-| `!prefix [simbol]` | Lihat/ubah prefix chat ini (ekstensi) |
-| `!toimg` | Konversi sticker static ke gambar |
-| `!togif` | Konversi animated sticker ke video (dikirim sebagai MP4) |
-| `!menu` | Daftar command |
-| `!help` | Bantuan |
-| `!ping` | Cek status bot |
-
-## Keamanan & Perilaku V1
+## Keamanan & Standar Operasional
 
 - **Webhook HMAC mandatory**: jika `WAHA_WEBHOOK_HMAC_KEY` diisi, request tanpa/tanda tangan salah ditolak (403). Kosongkan hanya untuk development.
 - **Privacy logging**: log production hanya berisi hash identifier (tanpa nomor/isi pesan mentah).

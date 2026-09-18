@@ -27,6 +27,17 @@ export interface EnvConfig {
   tempDir: string;
   tempFileTtlSeconds: number;
   dataDir: string;
+  maxImageJobs: number;
+  maxVideoJobs: number;
+  maxBackgroundJobs: number;
+  maxAnimationJobs: number;
+  backgroundRemovalProvider: 'local' | 'api' | 'disabled';
+  backgroundRemovalApiUrl: string;
+  backgroundRemovalApiKey: string;
+  backgroundRemovalTimeoutMs: number;
+  backgroundRemovalConcurrency: number;
+  batchMaxItems: number;
+  batchConcurrency: number;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -58,6 +69,17 @@ const env: EnvConfig = {
   tempDir: process.env.TEMP_DIR || '/tmp/waha-sticker-bot',
   tempFileTtlSeconds: Number(process.env.TEMP_FILE_TTL_SECONDS) || 300,
   dataDir: process.env.DATA_DIR || './data',
+  maxImageJobs: Number(process.env.MAX_IMAGE_JOBS) || 4,
+  maxVideoJobs: Number(process.env.MAX_VIDEO_JOBS) || 2,
+  maxBackgroundJobs: Number(process.env.MAX_BACKGROUND_JOBS) || 1,
+  maxAnimationJobs: Number(process.env.MAX_ANIMATION_JOBS) || 2,
+  backgroundRemovalProvider: ((process.env.BACKGROUND_REMOVAL_PROVIDER as any) || 'disabled'),
+  backgroundRemovalApiUrl: process.env.BACKGROUND_REMOVAL_API_URL || '',
+  backgroundRemovalApiKey: process.env.BACKGROUND_REMOVAL_API_KEY || '',
+  backgroundRemovalTimeoutMs: Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS) || 30000,
+  backgroundRemovalConcurrency: Number(process.env.BACKGROUND_REMOVAL_CONCURRENCY) || 1,
+  batchMaxItems: Number(process.env.BATCH_MAX_ITEMS) || 10,
+  batchConcurrency: Number(process.env.BATCH_CONCURRENCY) || 2,
 };
 
 export default env;

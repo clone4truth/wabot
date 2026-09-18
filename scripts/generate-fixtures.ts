@@ -85,11 +85,51 @@ async function main() {
     fs.writeFileSync(path.join(outDir, 'circle.webp'), circleRes.buffer);
     console.log('✓ circle.webp');
 
+    // 6b. Image Effects
+    const blurRes = await imageProc.process(imageUrl, 'blur');
+    fs.writeFileSync(path.join(outDir, 'effect-blur.webp'), blurRes.buffer);
+    console.log('✓ effect-blur.webp');
+
+    const pixelRes = await imageProc.process(imageUrl, 'pixel');
+    fs.writeFileSync(path.join(outDir, 'effect-pixel.webp'), pixelRes.buffer);
+    console.log('✓ effect-pixel.webp');
+
     // 7. Meme
     const memeProc = new MemeProcessor();
     const memeRes = await memeProc.process(imageUrl, 'TEKS ATAS | TEKS BAWAH');
     fs.writeFileSync(path.join(outDir, 'meme.webp'), memeRes.buffer);
     console.log('✓ meme.webp');
+
+    // 8. TTP Style Presets
+    const ttpGold = await ttpProc.process('GOLD VIP EDITION', 'gold');
+    fs.writeFileSync(path.join(outDir, 'ttp-gold.webp'), ttpGold.buffer);
+    console.log('✓ ttp-gold.webp');
+
+    // 9. ATTP Effect Presets
+    const attpFade = await attpProc.process('FADE TEXT', 'fade');
+    fs.writeFileSync(path.join(outDir, 'attp-fade.webp'), attpFade.buffer);
+    console.log('✓ attp-fade.webp');
+
+    // 10. Templates
+    const { TerminalTemplate, BreakingTemplate } = await import('../src/stickers/templates/builtin.templates');
+    const termRes = await new TerminalTemplate().render({ text: 'npm run build' });
+    fs.writeFileSync(path.join(outDir, 'template-terminal.webp'), termRes.buffer);
+    console.log('✓ template-terminal.webp');
+
+    const breakRes = await new BreakingTemplate().render({ text: 'WAHA STIKER BOT RESMI DILUNCURKAN' });
+    fs.writeFileSync(path.join(outDir, 'template-breaking.webp'), breakRes.buffer);
+    console.log('✓ template-breaking.webp');
+
+    // 11. Emoji & Badge
+    const { EmojiGenerator } = await import('../src/stickers/generators/emoji.generator');
+    const emojiSticker = await new EmojiGenerator().process({ type: 'emoji', text: '😂🔥' }, { chatId: 'c', senderId: 's' });
+    fs.writeFileSync(path.join(outDir, 'emoji-sticker.webp'), emojiSticker.buffer);
+    console.log('✓ emoji-sticker.webp');
+
+    const { BadgeGenerator } = await import('../src/stickers/generators/badge.generator');
+    const badgeSticker = await new BadgeGenerator().process({ type: 'badge', text: 'ONLINE' }, { chatId: 'c', senderId: 's' });
+    fs.writeFileSync(path.join(outDir, 'badge-online.webp'), badgeSticker.buffer);
+    console.log('✓ badge-online.webp');
   } finally {
     env.wahaBaseUrl = savedBase;
     env.wahaApiUrl = savedApi;
