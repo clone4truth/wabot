@@ -15,6 +15,7 @@ import { handlePing } from '../commands/ping.handler';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
+import env from '../config/env';
 import { logger } from '../observability/logger';
 
 const verifier = new WebhookVerifier();
@@ -31,11 +32,25 @@ commandRouter.register('togif', createTogifHandler(stickerService));
 
 export async function webhookController(request: FastifyRequest, reply: FastifyReply) {
   const startTime = Date.now();
-  const body = JSON.stringify(request.body);
+  const rawBody = (request as any).rawBody?.toString() || JSON.stringify(request.body);
+  const body = rawBody;
 
   try {
     verifier.validateBodySize(body);
-    verifier.verifyBody(body, Array.isArray(request.headers['x-hub-signature-256']) ? request.headers['x-hub-signature-256'][0] : (request.headers['x-hub-signature-256'] || ''));
+    const sigHeader = Array.isArray(request.headers['x-hub-signature-256']) ? request.headers['x-hub-signature-256'][0] : (request.headers['x-hub-signature-256'] || '');
+    const verifyResult = verifier.verify(body, sigHeader);
+    if (!verifyResult.valid) {
+      logger.warn('Invalid webhook signature — debug details', {
+        requestId: request.id,
+        rawBody: body.slice(0, 200),
+        sigHeader: sigHeader ? sigHeader.slice(0, 20) : '(empty)',
+        expectedPrefix: verifyResult.expected ? verifyResult.expected.slice(0, 20) : 'N/A',
+        receivedPrefix: verifyResult.received ? verifyResult.received.slice(0, 20) : 'N/A',
+        bodyLength: body.length,
+        hmacKeySet: !!env.wahaWebhookHmacKey,
+      });
+      throw new AppError(ErrorCode.INVALID_WEBHOOK_SIGNATURE, 'Invalid webhook signature');
+    }
 
     const payload = request.body as any;
 
@@ -117,8 +132,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     return reply.code(200).send({ status: 'ok' });
   } catch (err: any) {
     if (err instanceof AppError && err.code === ErrorCode.INVALID_WEBHOOK_SIGNATURE) {
-      logger.warn('Invalid webhook signature', { requestId: request.id });
-      return reply.code(403).send({ error: 'Invalid signature' });
+      return reply.code(403).send({ error: 'Invalid signature', debug: 'check logs for details' });
     }
     logger.error('Webhook processing error', { error: String(err), requestId: request.id });
     return reply.code(500).send({ error: 'Internal server error' });
