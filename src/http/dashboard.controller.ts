@@ -83,6 +83,7 @@ h1{font-size:24px;margin-bottom:24px;color:#38bdf8}
 <span class="command active">!menu</span>
 <span class="command active">!help</span>
 <span class="command active">!ping</span>
+<span class="command active">!prefix</span>
 </div>
 </div>
 <div class="card">

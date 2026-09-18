@@ -115,7 +115,27 @@ export class WAHAClient {
     }
   }
 
-  // Best-effort: info chat (nama + foto) via overview. null bila gagal.
+  // Best-effort: daftar partisipan grup + role (docs: participants/v2).
+  // Role selain 'participant' (admin/superadmin) dianggap admin.
+  async getGroupParticipants(groupId: string): Promise<{ id: string; role: string }[]> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(
+        `${this.baseUrl}/api/${this.session}/groups/${encodeURIComponent(groupId)}/participants/v2`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      const list = Array.isArray(data) ? data : data?.participants || [];
+      return list
+        .filter((p: any) => p && typeof p.id === 'string')
+        .map((p: any) => ({ id: p.id, role: String(p.role || 'participant') }));
+    } catch {
+      return [];
+    }
+  }
   async getChatInfo(chatId: string): Promise<{ name?: string; picture?: string } | null> {
     try {
       const controller = new AbortController();

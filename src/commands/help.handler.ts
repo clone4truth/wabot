@@ -13,7 +13,7 @@ export function handleHelp(): string {
     '!ttp Halo Dunia',
     '',
     '!toimg → Ubah sticker static jadi gambar',
-    '!togif → Ubah animated sticker jadi video',
+    '!prefix ? → Ubah prefix chat ini jadi ? (grup: khusus admin)',    '!togif → Ubah animated sticker jadi video',
     '!menu → Lihat semua command',
     '!ping → Cek bot hidup',
   ].join('\n');

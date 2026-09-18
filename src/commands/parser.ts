@@ -9,11 +9,11 @@ export interface ParsedCommand {
 
 const RESERVED_MODIFIERS = ['full', 'crop', 'circle', 'quote', 'bubble', 'meme', 'teks'];
 
-export function parseCommand(body: string): ParsedCommand | null {
+export function parseCommand(body: string, prefix: string = env.commandPrefix): ParsedCommand | null {
   const trimmed = body.trim();
-  if (!trimmed.startsWith(env.commandPrefix)) return null;
+  if (!prefix || !trimmed.startsWith(prefix)) return null;
 
-  const afterPrefix = trimmed.slice(env.commandPrefix.length).trim();
+  const afterPrefix = trimmed.slice(prefix.length).trim();
   const lower = afterPrefix.toLowerCase();
 
   const spaceIdx = afterPrefix.indexOf(' ');
@@ -39,6 +39,6 @@ export function parseCommand(body: string): ParsedCommand | null {
   };
 }
 
-export function isCommand(body: string): boolean {
-  return body.trim().startsWith(env.commandPrefix);
+export function isCommand(body: string, prefix: string = env.commandPrefix): boolean {
+  return !!prefix && body.trim().startsWith(prefix);
 }

@@ -68,3 +68,16 @@ describe('isCommand', () => {
     expect(isCommand('hello')).toBe(false);
   });
 });
+
+describe('Custom prefix', () => {
+  it('parse dengan prefix custom', () => {
+    expect(parseCommand('?ping', '?')?.name).toBe('ping');
+    expect(parseCommand('!ping', '?')).toBe(null);
+    expect(parseCommand('?stiker halo', '?')).toMatchObject({ name: 'stiker', args: 'halo' });
+  });
+
+  it('isCommand hormati prefix', () => {
+    expect(isCommand('?ping', '?')).toBe(true);
+    expect(isCommand('!ping', '?')).toBe(false);
+  });
+});

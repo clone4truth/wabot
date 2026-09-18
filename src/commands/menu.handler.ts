@@ -15,6 +15,7 @@ export function handleMenu(): string {
     '!toimg — Konversi sticker static ke gambar',
     '!togif — Konversi animated sticker ke media',
     '!menu — Tampilkan daftar ini',
+    '!prefix — Lihat/ubah prefix chat ini',
     '!help — Bantuan penggunaan',
     '!ping — Cek status bot',
   ].join('\n');

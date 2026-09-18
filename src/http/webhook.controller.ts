@@ -14,6 +14,7 @@ import { handleMenu } from '../commands/menu.handler';
 import { handleHelp } from '../commands/help.handler';
 import { handlePing } from '../commands/ping.handler';
 import { WAHAClient } from '../whatsapp/waha.client';
+import { AccessGuard } from '../security/access';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import env from '../config/env';
@@ -25,6 +26,7 @@ const idempotency = new IdempotencyGuard();
 const rateLimiter = new MemoryRateLimiter();
 const stickerService = new StickerService();
 const wahaClient = new WAHAClient();
+const accessGuard = new AccessGuard(wahaClient);
 const commandRouter = new CommandRouter();
 
 commandRouter.register('stiker', createStikerHandler(stickerService));
@@ -87,8 +89,20 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       bodyPrefix: message.body.slice(0, 30),
     });
 
-    if (normalizer.shouldIgnore(message) || message.fromMe) {
+    const prefix = accessGuard.resolvePrefix(message.chatId);
+
+    if (normalizer.shouldIgnore(message, prefix) || message.fromMe) {
       return reply.code(200).send({ status: 'ok' });
+    }
+
+    const access = await accessGuard.check(message);
+    if (!access.allowed) {
+      if (access.reason === 'admin') {
+        await wahaClient.sendText(message.chatId, '🔒 Bot ini hanya merespons admin grup.', message.messageId);
+      } else {
+        logger.info('Access ditolak', { requestId: request.id, reason: access.reason });
+      }
+      return reply.code(200).send({ status: 'ok', denied: access.reason });
     }
 
     const rateKey = message.isGroup ? `group:${message.chatId}` : message.senderId;
@@ -105,7 +119,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       return reply.code(200).send({ status: 'ok', duplicate: true });
     }
 
-    const parsed = parseCommand(message.body);
+    const parsed = parseCommand(message.body, prefix);
     if (!parsed) {
       return reply.code(200).send({ status: 'ok' });
     }
@@ -132,6 +146,23 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
   }
 }
 
+async function handlePrefixCommand(message: any, arg: string, replyTo?: string) {
+  const current = accessGuard.resolvePrefix(message.chatId);
+  if (!arg) {
+    await wahaClient.sendText(message.chatId, `Prefix chat ini: "${current}"\nUbah: ${current}prefix <simbol>`, replyTo);
+    return;
+  }
+  if (message.isGroup && !(await accessGuard.isGroupAdmin(message.chatId, message.senderId))) {
+    await wahaClient.sendText(message.chatId, '🔒 Hanya admin grup yang bisa ubah prefix.', replyTo);
+    return;
+  }
+  if (accessGuard.setPrefix(message.chatId, arg)) {
+    await wahaClient.sendText(message.chatId, `✅ Prefix diubah ke "${arg}"`, replyTo);
+  } else {
+    await wahaClient.sendText(message.chatId, `❌ Prefix harus 1 karakter simbol (mis. ! ? .). Prefix saat ini: "${current}"`, replyTo);
+  }
+}
+
 async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseCommand>>, message: any) {
   const replyTo = message.messageId;
   switch (parsed.name) {
@@ -144,6 +175,9 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
     case 'ping':
       const ping = handlePing();
       await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`, replyTo);
+      break;
+    case 'prefix':
+      await handlePrefixCommand(message, parsed.args.trim(), replyTo);
       break;
     default:
       let result: any;

@@ -12,6 +12,7 @@ const wahaMocks = vi.hoisted(() => ({
   getChatInfo: vi.fn().mockResolvedValue(null),
   getContactSavedName: vi.fn().mockResolvedValue(undefined),
   getProfilePicture: vi.fn().mockResolvedValue(null),
+  getGroupParticipants: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../src/whatsapp/waha.client', () => ({
@@ -146,5 +147,81 @@ describe('Webhook end-to-end', () => {
     const last = results[results.length - 1];
     expect(last.status).toBe(200);
     expect(JSON.parse(last.body).status).toBe('rate_limited');
+  });
+
+  it('sender terblokir -> diam (200 tanpa aksi)', async () => {
+    env.blockedSenderIds = ['jahat@c.us'];
+    try {
+      const res = await postWebhook(rawMessage('!ping', { from: 'jahat@c.us' }));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).denied).toBe('blocked');
+      expect(wahaMocks.sendText).not.toHaveBeenCalled();
+    } finally {
+      env.blockedSenderIds = [];
+    }
+  });
+
+  it('chat di luar allowlist -> diam', async () => {
+    env.allowedChatIds = ['grup-utama@g.us'];
+    try {
+      const res = await postWebhook(rawMessage('!ping', { from: 'grup-lain@g.us' }));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).denied).toBe('chat');
+      expect(wahaMocks.sendText).not.toHaveBeenCalled();
+    } finally {
+      env.allowedChatIds = [];
+    }
+  });
+
+  it('admin-only: member ditolak, admin diproses', async () => {
+    env.groupAdminOnly = true;
+    wahaMocks.getGroupParticipants.mockResolvedValue([
+      { id: 'bos@c.us', role: 'admin' },
+      { id: 'warga@c.us', role: 'participant' },
+    ]);
+    try {
+      const group = uid('grup') + '@g.us';
+      const denied = await postWebhook(rawMessage('!ping', { from: group }));
+      expect(denied.statusCode).toBe(200);
+      expect(JSON.parse(denied.body).denied).toBe('admin');
+      expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('admin');
+
+      vi.clearAllMocks();
+      wahaMocks.getGroupParticipants.mockResolvedValue([
+        { id: 'bos@c.us', role: 'admin' },
+        { id: 'warga@c.us', role: 'participant' },
+      ]);
+      const ok = await postWebhook(
+        rawMessage('!ping', { from: group, participant: 'bos@c.us' }),
+      );
+      expect(ok.statusCode).toBe(200);
+      expect(wahaMocks.sendSticker).not.toHaveBeenCalled();
+    } finally {
+      env.groupAdminOnly = false;
+      wahaMocks.getGroupParticipants.mockResolvedValue([]);
+    }
+  });
+
+  it('!prefix lihat + ubah + dipakai', async () => {
+    const { getSharedStore } = await import('../../src/storage/json-store');
+    const chat = uid('chatprefix') + '@c.us';
+    const store = getSharedStore(env.dataDir);
+    try {
+      const show = await postWebhook(rawMessage('!prefix', { from: chat }));
+      expect(show.statusCode).toBe(200);
+      expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('Prefix chat ini');
+
+      vi.clearAllMocks();
+      const set = await postWebhook(rawMessage('!prefix ?', { from: chat }));
+      expect(set.statusCode).toBe(200);
+      expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('diubah');
+
+      vi.clearAllMocks();
+      const used = await postWebhook(rawMessage('?ping', { from: chat }));
+      expect(used.statusCode).toBe(200);
+      expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('Pong');
+    } finally {
+      store.delete(`prefix:${chat}`);
+    }
   });
 });

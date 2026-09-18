@@ -1,4 +1,5 @@
 import { WAHAPayload, WahaMessage, NormalizedMessage } from './types';
+import { isCommand } from '../commands/parser';
 import { logger } from '../observability/logger';
 
 export class MessageNormalizer {
@@ -80,10 +81,10 @@ export class MessageNormalizer {
     return { id: undefined, name: rawNotify || '?' };
   }
 
-  shouldIgnore(msg: NormalizedMessage): boolean {
+  shouldIgnore(msg: NormalizedMessage, prefix?: string): boolean {
     if (msg.fromMe) return true;
     if (!msg.body && !msg.media) return true;
-    if (!msg.body?.startsWith('!')) return true;
+    if (!isCommand(msg.body || '', prefix)) return true;
     return false;
   }
 }

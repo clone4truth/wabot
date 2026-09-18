@@ -11,6 +11,9 @@ export interface EnvConfig {
   wahaSession: string;
   wahaWebhookHmacKey: string;
   commandPrefix: string;
+  allowedChatIds: string[];
+  blockedSenderIds: string[];
+  groupAdminOnly: boolean;
   maxTextLength: number;
   maxImageBytes: number;
   maxVideoBytes: number;
@@ -28,6 +31,10 @@ export interface EnvConfig {
   mediaCacheMaxBytes: number;
 }
 
+function splitList(raw: string | undefined): string[] {
+  return (raw || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 const env: EnvConfig = {
   appPort: Number(process.env.APP_PORT) || 3000,
   appEnv: process.env.APP_ENV || 'development',
@@ -37,6 +44,9 @@ const env: EnvConfig = {
   wahaSession: process.env.WAHA_SESSION || 'default',
   wahaWebhookHmacKey: process.env.WAHA_WEBHOOK_HMAC_KEY || '',
   commandPrefix: process.env.COMMAND_PREFIX || '!',
+  allowedChatIds: splitList(process.env.ALLOWED_CHAT_IDS),
+  blockedSenderIds: splitList(process.env.BLOCKED_SENDER_IDS),
+  groupAdminOnly: (process.env.GROUP_ADMIN_ONLY || '').toLowerCase() === 'true',
   maxTextLength: Number(process.env.MAX_TEXT_LENGTH) || 300,
   maxImageBytes: Number(process.env.MAX_IMAGE_BYTES) || 15 * 1024 * 1024,
   maxVideoBytes: Number(process.env.MAX_VIDEO_BYTES) || 20 * 1024 * 1024,
