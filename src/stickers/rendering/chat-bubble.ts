@@ -14,6 +14,7 @@ export interface ChatBubbleOptions {
   senderId: string;
   text: string;
   quoted?: QuotedMessage;
+  avatar?: { buffer: Buffer; mimetype: string } | null;
   time?: string;
 }
 
@@ -50,7 +51,7 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
 }
 
 export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Promise<Buffer> {
-  const { senderName, senderId, quoted } = options;
+  const { senderName, senderId, quoted, avatar } = options;
   const text = String(options.text ?? '');
   const time = options.time || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
@@ -58,7 +59,13 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const bubbleX = 30;
   const bubbleW = 452;
   const pad = 26;
-  const innerW = bubbleW - pad * 2;
+
+  // Kolom avatar di kiri bila foto profil tersedia.
+  const avatarSize = 76;
+  const avatarGap = 18;
+  const indent = avatar ? avatarSize + avatarGap : 0;
+  const contentX = pad + indent;
+  const innerW = bubbleW - pad - indent - pad;
 
   const nameSize = 30;
   const quoteNameSize = 24;
@@ -76,19 +83,19 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const parts: string[] = [];
 
   // Nama pengirim
-  parts.push(`<text x="${pad}" y="${y + nameSize}" font-family="sans-serif" font-size="${nameSize}" font-weight="bold" fill="${nameColor}">${escapeXml(senderName)}</text>`);
+  parts.push(`<text x="${contentX}" y="${y + nameSize}" font-family="sans-serif" font-size="${nameSize}" font-weight="bold" fill="${nameColor}">${escapeXml(senderName)}</text>`);
   y += lh(nameSize) + 8;
 
   // Blok quote (balasan)
   if (quoted) {
     const quoteH = 14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14;
-    parts.push(`<rect x="${pad - 10}" y="${y}" width="${innerW + 20}" height="${quoteH}" rx="12" fill="#ffffff" opacity="0.07"/>`);
-    parts.push(`<rect x="${pad - 10}" y="${y}" width="7" height="${quoteH}" rx="3.5" fill="${quotedColor}"/>`);
+    parts.push(`<rect x="${contentX - 10}" y="${y}" width="${innerW + 20}" height="${quoteH}" rx="12" fill="#ffffff" opacity="0.07"/>`);
+    parts.push(`<rect x="${contentX - 10}" y="${y}" width="7" height="${quoteH}" rx="3.5" fill="${quotedColor}"/>`);
     let qy = y + 14;
-    parts.push(`<text x="${pad + 12}" y="${qy + quoteNameSize}" font-family="sans-serif" font-size="${quoteNameSize}" font-weight="bold" fill="${quotedColor}">${escapeXml(quoted.senderName)}</text>`);
+    parts.push(`<text x="${contentX + 12}" y="${qy + quoteNameSize}" font-family="sans-serif" font-size="${quoteNameSize}" font-weight="bold" fill="${quotedColor}">${escapeXml(quoted.senderName)}</text>`);
     qy += lh(quoteNameSize);
     for (const line of quotedLines) {
-      parts.push(`<text x="${pad + 12}" y="${qy + quoteBodySize}" font-family="sans-serif" font-size="${quoteBodySize}" fill="#cfd4d9">${escapeXml(line)}</text>`);
+      parts.push(`<text x="${contentX + 12}" y="${qy + quoteBodySize}" font-family="sans-serif" font-size="${quoteBodySize}" fill="#cfd4d9">${escapeXml(line)}</text>`);
       qy += lh(quoteBodySize);
     }
     y += quoteH + 12;
@@ -96,22 +103,34 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
 
   // Teks utama
   for (const line of textLines) {
-    parts.push(`<text x="${pad}" y="${y + textSize}" font-family="sans-serif" font-size="${textSize}" fill="#ffffff">${escapeXml(line)}</text>`);
+    parts.push(`<text x="${contentX}" y="${y + textSize}" font-family="sans-serif" font-size="${textSize}" fill="#ffffff">${escapeXml(line)}</text>`);
     y += lh(textSize);
   }
 
   // Jam
   y += 4;
-  parts.push(`<text x="${pad + innerW}" y="${y + timeSize}" font-family="sans-serif" font-size="${timeSize}" fill="#8696a0" text-anchor="end">${escapeXml(time)}</text>`);
+  parts.push(`<text x="${contentX + innerW}" y="${y + timeSize}" font-family="sans-serif" font-size="${timeSize}" fill="#8696a0" text-anchor="end">${escapeXml(time)}</text>`);
   y += lh(timeSize);
 
   const bubbleH = y + pad;
   const bubbleY = Math.max(14, Math.round((W - bubbleH) / 2));
 
+  // Avatar lingkaran di kiri atas bubble.
+  let defs = '';
+  let avatarEl = '';
+  if (avatar) {
+    const dataUri = `data:${avatar.mimetype};base64,${avatar.buffer.toString('base64')}`;
+    const cx = bubbleX + pad + avatarSize / 2;
+    const cy = bubbleY + pad + 8 + avatarSize / 2;
+    defs = `<defs><clipPath id="av"><circle cx="${cx}" cy="${cy}" r="${avatarSize / 2}"/></clipPath></defs>`;
+    avatarEl = `<image href="${dataUri}" x="${cx - avatarSize / 2}" y="${cy - avatarSize / 2}" width="${avatarSize}" height="${avatarSize}" clip-path="url(#av)" preserveAspectRatio="xMidYMid slice"/>`;
+  }
+
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${W}" viewBox="0 0 ${W} ${W}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${W}" viewBox="0 0 ${W} ${W}">` + defs +
     `<rect x="${bubbleX}" y="${bubbleY}" width="${bubbleW}" height="${bubbleH}" rx="26" fill="#1f2c34"/>` +
     `<polygon points="${bubbleX + 18},${bubbleY} ${bubbleX - 12},${bubbleY + 6} ${bubbleX + 18},${bubbleY + 30}" fill="#1f2c34"/>` +
+    avatarEl +
     `<g transform="translate(${bubbleX},${bubbleY})">${parts.join('')}</g>` +
     `</svg>`;
 

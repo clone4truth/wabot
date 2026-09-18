@@ -6,16 +6,23 @@ import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 
 export class BubbleProcessor {
-  async process(text: string, senderName?: string, senderId?: string, quoted?: QuotedMessage): Promise<StickerResult> {
+  async process(
+    text: string,
+    senderName?: string,
+    senderId?: string,
+    quoted?: QuotedMessage,
+    avatar?: { buffer: Buffer; mimetype: string } | null,
+  ): Promise<StickerResult> {
     if (text.length > env.maxTextLength) {
       throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks maksimal ${env.maxTextLength} karakter`);
     }
 
     const bubble = await renderChatBubbleToBuffer({
-      senderName: senderName || 'W',
+      senderName: senderName || '?',
       senderId: senderId || senderName || '?',
       text,
       quoted,
+      avatar,
     });
 
     const webpBuffer = await Sharp(bubble)

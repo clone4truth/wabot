@@ -96,4 +96,30 @@ export class WAHAClient {
       // Reaction is optional, ignore failures
     }
   }
+
+  // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.
+  async getProfilePicture(chatId: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(
+        `${this.baseUrl}/api/${this.session}/chats/${encodeURIComponent(chatId)}/picture`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (!res.ok) return null;
+      const { url } = (await res.json()) as { url?: string | null };
+      if (!url) return null;
+
+      const imgRes = await fetch(url);
+      if (!imgRes.ok) return null;
+      const mimetype = imgRes.headers.get('content-type') || 'image/jpeg';
+      if (!mimetype.startsWith('image/')) return null;
+      const buffer = Buffer.from(await imgRes.arrayBuffer());
+      if (buffer.length === 0 || buffer.length > 2 * 1024 * 1024) return null;
+      return { buffer, mimetype };
+    } catch {
+      return null;
+    }
+  }
 }

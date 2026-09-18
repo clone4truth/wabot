@@ -6,6 +6,7 @@ import { ToImageProcessor } from './processors/toimg.processor';
 import { ToGifProcessor } from './processors/togif.processor';
 import { InputResolver, ResolvedInput } from './input.resolver';
 import { downloadMedia } from '../media/downloader';
+import { WAHAClient } from '../whatsapp/waha.client';
 import Sharp from 'sharp';
 import fs from 'fs';
 import env from '../config/env';
@@ -14,6 +15,7 @@ import { ErrorCode } from '../errors/error-codes';
 
 export class StickerService {
   private inputResolver = new InputResolver();
+  private wahaClient = new WAHAClient();
   private processors = {
     text: new BubbleProcessor(),
     image: new ImageStickerProcessor(),
@@ -59,7 +61,11 @@ export class StickerService {
         const quoted = content.quotedBody
           ? { senderName: content.quotedSenderName || '?', senderId: content.quotedSenderId, body: content.quotedBody }
           : undefined;
-        return this.processors.text.process(content.text ?? '', content.senderName, content.senderId, quoted);
+        // Avatar best-effort: tanpa foto profil bubble tetap dirender.
+        const avatar = content.senderId
+          ? await this.wahaClient.getProfilePicture(content.senderId).catch(() => null)
+          : null;
+        return this.processors.text.process(content.text ?? '', content.senderName, content.senderId, quoted, avatar);
       }
       case 'image': {
         if (!content.mediaUrl) {
