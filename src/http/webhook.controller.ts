@@ -71,6 +71,20 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 
     const message = normalizer.normalize(payload);
 
+    const raw = (payload as any).payload as any;
+    logger.info('Incoming message', {
+      requestId: request.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      isGroup: message.isGroup,
+      fromMe: message.fromMe,
+      rawFrom: raw?.from,
+      rawTo: raw?.to,
+      rawParticipant: raw?.participant,
+      rawSender: raw?.sender?.id || raw?.sender,
+      bodyPrefix: message.body.slice(0, 30),
+    });
+
     if (normalizer.shouldIgnore(message) || message.fromMe) {
       return reply.code(200).send({ status: 'ok' });
     }
