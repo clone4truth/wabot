@@ -1,4 +1,24 @@
-FROM node:22-alpine
+FROM node:22-alpine AS builder
+
+RUN apk add --no-cache \
+    ffmpeg \
+    fontconfig \
+    ttf-dejavu \
+    ttf-noto \
+    && fc-cache -f
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY vitest.config.ts ./
+RUN npm ci
+
+COPY src ./src
+COPY tests ./tests
+RUN npm run build
+
+FROM node:22-alpine AS runtime
 
 RUN apk add --no-cache \
     ffmpeg \
@@ -12,7 +32,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 
-COPY dist ./dist
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
