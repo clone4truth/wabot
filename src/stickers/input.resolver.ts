@@ -2,7 +2,7 @@ import env from '../config/env';
 import { NormalizedMessage } from '../whatsapp/types';
 
 export interface ResolvedInput {
-  type: 'text' | 'image' | 'video' | 'toimg' | 'togif' | 'ttp' | 'meme';
+  type: 'text' | 'image' | 'video' | 'toimg' | 'togif' | 'ttp' | 'attp' | 'meme';
   source: 'reply' | 'media' | 'direct';
   content: {
     text?: string;
@@ -48,13 +48,13 @@ export class InputResolver {
       return { type: 'togif', source: 'reply', content: { args: reply?.body || '', mediaUrl: reply?.media?.url || media?.url } };
     }
 
-    if (commandName !== 'stiker' && commandName !== 'ttp') return null;
+    if (commandName !== 'stiker' && commandName !== 'ttp' && commandName !== 'attp') return null;
 
-    // Text-to-Picture: !ttp <teks> (atau reply teks).
-    if (commandName === 'ttp') {
-      const ttpText = args || reply?.body || '';
-      if (!ttpText) return null;
-      return { type: 'ttp', source: args ? 'direct' : 'reply', content: { text: ttpText, args } };
+    // Text-to-Picture (statis) & Animated-TTP: !ttp / !attp <teks> (atau reply teks).
+    if (commandName === 'ttp' || commandName === 'attp') {
+      const inputText = args || reply?.body || '';
+      if (!inputText) return null;
+      return { type: commandName, source: args ? 'direct' : 'reply', content: { text: inputText, args } };
     }
 
     // Priority 1: Replied message

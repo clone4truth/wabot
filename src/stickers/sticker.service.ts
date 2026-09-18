@@ -4,6 +4,7 @@ import { TextStickerProcessor } from './processors/text.processor';
 import { QuoteProcessor } from './processors/quote.processor';
 import { MemeProcessor } from './processors/meme.processor';
 import { TtpProcessor } from './processors/ttp.processor';
+import { AttpProcessor } from './processors/attp.processor';
 import { ImageStickerProcessor } from './processors/image.processor';
 import { addStickerExif } from './exif';
 import { logger } from '../observability/logger';
@@ -35,6 +36,7 @@ export class StickerService {
     quote: new QuoteProcessor(),
     meme: new MemeProcessor(),
     ttp: new TtpProcessor(),
+    attp: new AttpProcessor(),
     image: new ImageStickerProcessor(),
     video: new VideoStickerProcessor(),
     toimg: new ToImageProcessor(),
@@ -158,6 +160,9 @@ export class StickerService {
       case 'ttp': {
         return this.processors.ttp.process(content.text ?? '');
       }
+      case 'attp': {
+        return this.processors.attp.process(content.text ?? '');
+      }
       case 'video': {
         if (!content.mediaUrl) {
           throw new AppError(ErrorCode.MEDIA_NOT_AVAILABLE, 'Media tidak tersedia');
@@ -193,6 +198,7 @@ export class StickerService {
       togif: env.videoProcessingTimeoutMs,
       meme: env.imageProcessingTimeoutMs,
       ttp: env.textProcessingTimeoutMs,
+      attp: env.videoProcessingTimeoutMs,
     };
     return timeouts[inputType] || env.textProcessingTimeoutMs;
   }

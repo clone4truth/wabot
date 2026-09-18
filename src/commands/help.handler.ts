@@ -11,6 +11,7 @@ export function handleHelp(): string {
     'Reply teks lalu !stiker quote',
     '!stiker meme TEKAN | DISINI',
     '!ttp Halo Dunia',
+    '!attp Halo Dunia',
     '',
     '!toimg → Ubah sticker static jadi gambar',
     '!prefix ? → Ubah prefix chat ini jadi ? (grup: khusus admin)',    '!togif → Ubah animated sticker jadi video',

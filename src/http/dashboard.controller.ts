@@ -78,6 +78,7 @@ h1{font-size:24px;margin-bottom:24px;color:#38bdf8}
 <div class="commands">
 <span class="command active">!stiker</span>
 <span class="command active">!ttp</span>
+<span class="command active">!attp</span>
 <span class="command active">!toimg</span>
 <span class="command active">!togif</span>
 <span class="command active">!menu</span>

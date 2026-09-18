@@ -122,14 +122,24 @@ describe('Webhook end-to-end', () => {
     expect(buf.slice(0, 4).toString()).toBe('RIFF');
   }, 30000);
 
-  it('!ttp hello -> stiker gradien ber-EXIF', async () => {
-    const res = await postWebhook(rawMessage('!ttp hello'));
+  it('!ttp hello -> stiker gradien ber-EXIF', async () => {    const res = await postWebhook(rawMessage('!ttp hello'));
     expect(res.statusCode).toBe(200);
     expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
     const buf: Buffer = wahaMocks.sendSticker.mock.calls[0][1];
     expect(buf.slice(0, 4).toString()).toBe('RIFF');
     expect(buf.toString('binary')).toContain('sticker-pack-id');
   }, 30000);
+
+  it('!attp hello -> stiker webp animasi', async () => {
+    const res = await postWebhook(rawMessage('!attp hello'));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
+    const buf: Buffer = wahaMocks.sendSticker.mock.calls[0][1];
+    expect(buf.slice(0, 4).toString()).toBe('RIFF');
+    const Sharp = (await import('sharp')).default;
+    const meta = await Sharp(buf).metadata();
+    expect(meta.pages).toBeGreaterThan(1);
+  }, 60000);
 
   it('spam cepat dari satu user -> rate_limited tanpa retry storm', async () => {
     const from = uid('spammer') + '@c.us';

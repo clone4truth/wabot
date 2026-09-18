@@ -105,6 +105,12 @@ describe('InputResolver', () => {
     expect(meme?.content.args).toBe('A | B');
   });
 
+  it('!attp langsung dan via reply teks', () => {
+    expect(resolver.resolve({ command: '!attp', args: 'gas' })?.type).toBe('attp');
+    expect(resolver.resolve({ command: '!attp', args: '', reply: { body: 'gas' } })?.content.text).toBe('gas');
+    expect(resolver.resolve({ command: '!attp', args: '' })).toBe(null);
+  });
+
   it('tanpa input -> null; command lain -> null', () => {
     expect(resolver.resolve({ command: '!stiker', args: '' })?.type ?? null).toBe(null);
     expect(resolver.resolve({ command: '!ping', args: '' })).toBe(null);
