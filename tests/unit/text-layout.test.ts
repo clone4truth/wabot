@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import Sharp from 'sharp';
-import { renderTextToBuffer, renderFittedText } from '../../src/stickers/rendering/text-layout';
+import { renderTextToBuffer, renderFittedText, calculateTextLayout } from '../../src/stickers/rendering/text-layout';
 import { ErrorCode } from '../../src/errors/error-codes';
 
 async function pixels(buf: Buffer) {
@@ -43,6 +43,19 @@ describe('Text outline (Pango stroke tak valid -> paint-order SVG)', () => {
 });
 
 describe('Adaptive fitted layout (ukur render aktual)', () => {
+  it('calculateTextLayout: menghasilkan metrik layout deterministik tanpa rendering', () => {
+    const layout = calculateTextLayout({
+      text: 'Halo dunia stiker bot',
+      maxWidth: 512,
+      fontSize: 32,
+      margin: 16,
+    });
+    expect(layout.fontSize).toBe(32);
+    expect(layout.lineHeight).toBe(Math.round(32 * 1.25));
+    expect(layout.lines.length).toBeGreaterThan(0);
+    expect(layout.totalHeight).toBe(layout.lines.length * layout.lineHeight);
+  });
+
   it('teks pendek -> font besar, teks panjang -> mengecil', async () => {
     const short = await renderFittedText({ text: 'Hi', maxWidth: 512, maxHeight: 512 });
     const long = await renderFittedText({
@@ -76,12 +89,20 @@ describe('Adaptive fitted layout (ukur render aktual)', () => {
   }, 120000);
 });
 
-
 describe('Unicode + emoji', () => {
   it('render tanpa crash (fallback font environment)', async () => {
     const fitted = await renderFittedText({ text: 'Halo 😂🔥 Semangat 💪 Indonesia 🇮🇩', maxWidth: 512, maxHeight: 512 });
     expect(fitted.buffer.length).toBeGreaterThan(1000);
     const { info } = await Sharp(fitted.buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
     expect(info.width).toBeGreaterThan(50);
+  }, 120000);
+
+  it('100 emoji render dan fit dalam safe area tanpa clip', async () => {
+    const emoji100 = '😂'.repeat(100);
+    const fitted = await renderFittedText({ text: emoji100, maxWidth: 512, maxHeight: 512, minFontSize: 16 });
+    expect(fitted.buffer.length).toBeGreaterThan(500);
+    const { info } = await Sharp(fitted.buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+    expect(info.width).toBeLessThanOrEqual(512 - 32);
+    expect(info.height).toBeLessThanOrEqual(512 - 32);
   }, 120000);
 });

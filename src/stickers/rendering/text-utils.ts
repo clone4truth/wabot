@@ -3,12 +3,43 @@ import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 
 /**
- * Hitung jumlah karakter Unicode sesungguhnya (grapheme/codepoint),
- * bukan raw UTF-16 code units (seperti emoji yang terdiri dari surrogate pairs).
+ * Pisahkan string menjadi array grapheme cluster utuh (user-perceived characters).
+ * Mencegah pemecahan sequence ZWJ, skin tone modifiers, dan bendera regional.
  */
-export function countUnicodeCharacters(text: string): number {
-  return Array.from(String(text ?? '')).length;
+export function splitGraphemes(text: string): string[] {
+  const normalized = String(text ?? '');
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const segmenter = new Intl.Segmenter('id', {
+      granularity: 'grapheme',
+    });
+    return Array.from(
+      segmenter.segment(normalized),
+      segment => segment.segment,
+    );
+  }
+  return Array.from(normalized);
 }
+
+/**
+ * Hitung jumlah grapheme cluster aktual dalam teks.
+ */
+export function countGraphemes(text: string): number {
+  return splitGraphemes(text).length;
+}
+
+/**
+ * Potong teks berdasarkan batas grapheme cluster tanpa merusak sequence emoji.
+ */
+export function sliceGraphemes(text: string, start: number, end?: number): string {
+  const graphemes = splitGraphemes(text);
+  return graphemes.slice(start, end).join('');
+}
+
+/**
+ * Legacy alias untuk countGraphemes agar kompatibilitas fungsi lama tetap terjaga.
+ * Secara internal menggunakan grapheme cluster.
+ */
+export const countUnicodeCharacters = countGraphemes;
 
 /**
  * Normalisasi Unicode ke NFC dan trim spasi di awal/akhir tanpa merusak emoji/karakter internasional.
@@ -39,7 +70,7 @@ export interface TextValidationOptions {
  * Validasi umum untuk semua generator berbasis teks:
  * - Membersihkan teks via sanitizeText
  * - Memastikan tidak kosong (throw UNSUPPORTED_INPUT)
- * - Memastikan panjang karakter Unicode tidak melebihi batas (throw TEXT_TOO_LONG)
+ * - Memastikan panjang grapheme cluster tidak melebihi batas (throw TEXT_TOO_LONG)
  */
 export function validateText(text: string, options: TextValidationOptions = {}): string {
   const clean = sanitizeText(text);
@@ -53,7 +84,7 @@ export function validateText(text: string, options: TextValidationOptions = {}):
     );
   }
 
-  const length = countUnicodeCharacters(clean);
+  const length = countGraphemes(clean);
   if (length > maxLength) {
     throw new AppError(
       ErrorCode.TEXT_TOO_LONG,
@@ -66,54 +97,60 @@ export function validateText(text: string, options: TextValidationOptions = {}):
 }
 
 /**
- * Bungkus kata ke baris-baris berdasarkan maxChars.
- * Jika kata/token melebihi maxChars, token dipecah menjadi beberapa segmen tanpa data loss (tanpa …).
+ * Bungkus kata ke baris-baris berdasarkan maxChars (grapheme clusters).
+ * Jika kata/token melebihi maxChars, token dipecah menjadi beberapa segmen tanpa data loss (tanpa …)
+ * dan tanpa memecah sequence emoji multi-codepoint.
  */
 export function wrapWords(text: string, maxChars: number, maxLines?: number): string[] {
   const words = String(text ?? '').split(/\s+/).filter(Boolean);
   if (words.length === 0) return [''];
 
   const lines: string[] = [];
-  let current = '';
+  let currentGraphemes: string[] = [];
 
   for (const word of words) {
-    if (word.length > maxChars) {
-      if (current) {
-        lines.push(current);
-        current = '';
+    const wordGraphemes = splitGraphemes(word);
+
+    if (wordGraphemes.length > maxChars) {
+      if (currentGraphemes.length > 0) {
+        lines.push(currentGraphemes.join(''));
+        currentGraphemes = [];
         if (maxLines && lines.length >= maxLines) break;
       }
-      let remaining = word;
+      let remaining = [...wordGraphemes];
       while (remaining.length > 0) {
-        const chunk = remaining.slice(0, maxChars);
-        remaining = remaining.slice(maxChars);
+        const chunk = remaining.splice(0, maxChars);
         if (remaining.length > 0) {
-          lines.push(chunk);
+          lines.push(chunk.join(''));
           if (maxLines && lines.length >= maxLines) break;
         } else {
-          current = chunk;
+          currentGraphemes = chunk;
         }
       }
       if (maxLines && lines.length >= maxLines) break;
     } else {
-      const candidate = current ? `${current} ${word}` : word;
-      if (candidate.length <= maxChars) {
-        current = candidate;
+      const candidateGraphemes = currentGraphemes.length > 0
+        ? [...currentGraphemes, ' ', ...wordGraphemes]
+        : wordGraphemes;
+
+      if (candidateGraphemes.length <= maxChars) {
+        currentGraphemes = candidateGraphemes;
       } else {
-        if (current) lines.push(current);
+        if (currentGraphemes.length > 0) {
+          lines.push(currentGraphemes.join(''));
+        }
         if (maxLines && lines.length >= maxLines) {
-          current = '';
+          currentGraphemes = [];
           break;
         }
-        current = word;
+        currentGraphemes = wordGraphemes;
       }
     }
   }
 
-  if (current && (!maxLines || lines.length < maxLines)) {
-    lines.push(current);
+  if (currentGraphemes.length > 0 && (!maxLines || lines.length < maxLines)) {
+    lines.push(currentGraphemes.join(''));
   }
 
   return lines.length > 0 ? lines : [''];
 }
-

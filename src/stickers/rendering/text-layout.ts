@@ -1,8 +1,9 @@
 import { getDefaultFontPath, getFontFamily } from './fonts';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { escapeXml, wrapWords } from './text-utils';
+import { escapeXml, wrapWords, splitGraphemes } from './text-utils';
 import Sharp from 'sharp';
+import { logger } from '../../observability/logger';
 
 export interface TextLayoutOptions {
   text: string;
@@ -28,6 +29,53 @@ export interface FittedTextOptions extends TextLayoutOptions {
   margin?: number;
 }
 
+export interface TextLayoutMetrics {
+  lines: string[];
+  fontSize: number;
+  lineHeight: number;
+  totalHeight: number;
+  maxCharsPerLine: number;
+}
+
+/**
+ * Hitung metrik layout teks secara deterministik tanpa rendering.
+ */
+export function calculateTextLayout(options: {
+  text: string;
+  maxWidth: number;
+  fontSize: number;
+  margin?: number;
+  maxLines?: number;
+}): TextLayoutMetrics {
+  const { text, maxWidth, fontSize, margin = 16, maxLines } = options;
+  const safeWidth = Math.max(20, maxWidth - margin * 2);
+
+  // Deteksi rasio emoji/karakter lebar dalam teks untuk menyesuaikan estimasi maxCharsPerLine
+  const graphemes = splitGraphemes(text);
+  let wideCount = 0;
+  for (const g of graphemes) {
+    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(g)) {
+      wideCount++;
+    }
+  }
+  const wideRatio = graphemes.length > 0 ? wideCount / graphemes.length : 0;
+  // Karakter Latin rata-rata ~0.74em (dengan outline), emoji ~1.30em
+  const charWidthFactor = 0.74 + wideRatio * 0.56;
+  const maxCharsPerLine = Math.max(4, Math.floor(safeWidth / (fontSize * charWidthFactor)));
+
+  const lines = wrapWords(text, maxCharsPerLine, maxLines);
+  const lineHeight = Math.round(fontSize * 1.25);
+  const totalHeight = lines.length * lineHeight;
+
+  return {
+    lines,
+    fontSize,
+    lineHeight,
+    totalHeight,
+    maxCharsPerLine,
+  };
+}
+
 async function renderSingleLine(
   text: string,
   maxWidth: number,
@@ -42,17 +90,13 @@ async function renderSingleLine(
   const family = getFontFamily(getDefaultFontPath());
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const ax = align === 'left' ? margin : align === 'right' ? maxWidth - margin : maxWidth / 2;
-  const safeWidth = Math.max(20, maxWidth - margin * 2);
-  const maxChars = Math.max(4, Math.floor(safeWidth / (fontSize * 0.65)));
-  // Bungkus tanpa silent truncation
-  const lines = wrapWords(text, maxChars);
-  const lh = Math.round(fontSize * 1.25);
-  const totalH = lines.length * lh;
+
+  const layout = calculateTextLayout({ text, maxWidth, fontSize, margin });
+  const { lines, lineHeight: lh, totalHeight: totalH } = layout;
   const startY = Math.max(0, Math.round((maxHeight - totalH) / 2));
   const stroke = outlineWidth > 0 && outlineColor !== 'transparent'
     ? ` stroke="${outlineColor}" stroke-width="${Math.round(outlineWidth * 2)}" paint-order="stroke"`
     : '';
-
 
   const texts = lines
     .map((line, i) => {
@@ -90,10 +134,16 @@ export interface FittedTextResult {
   fontSize: number;
 }
 
-// Cari font terbesar agar hasil render aktual muat di safe area.
-// Ukur via trim box nyata, bukan estimasi panjang karakter.
+/**
+ * Cari font terbesar agar hasil render aktual muat di safe area.
+ * Menggunakan validasi 2-level:
+ * Level 1: Logical layout bounds (totalHeight <= safeHeight)
+ * Level 2: Rendered pixel trim box (info.width <= safeWidth && info.height <= safeHeight)
+ * Tidak pernah menerima output yang terpotong.
+ */
 export async function renderFittedText(options: FittedTextOptions): Promise<FittedTextResult> {
   const {
+    text,
     maxWidth,
     maxHeight,
     margin = 16,
@@ -105,13 +155,34 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
 
   let lastError: unknown = null;
   for (let size = maxFontSize; size >= minFontSize; size -= 4) {
+    const layout = calculateTextLayout({
+      text,
+      maxWidth,
+      fontSize: size,
+      margin,
+    });
+
+    // Level 1: Logical bounds check sebelum render
+    if (layout.totalHeight > safeH) {
+      lastError = new Error(`logical layout overflow (${layout.totalHeight}px > ${safeH}px) at ${size}px`);
+      continue;
+    }
+
     try {
       const buffer = await renderTextToBuffer({ ...options, fontSize: size, margin } as any);
+      
+      // Level 2: Rendered pixel trim bounds check
       const { info } = await Sharp(buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
       if (info.width <= safeW && info.height <= safeH) {
+        logger.debug('Text layout selected', {
+          fontSize: size,
+          lineCount: layout.lines.length,
+          renderWidth: info.width,
+          renderHeight: info.height,
+        });
         return { buffer, fontSize: size };
       }
-      lastError = new Error(`overflow at ${size}`);
+      lastError = new Error(`rendered trim overflow (${info.width}x${info.height} > ${safeW}x${safeH}) at ${size}px`);
     } catch (err) {
       lastError = err;
     }

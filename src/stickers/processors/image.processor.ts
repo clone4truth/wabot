@@ -79,10 +79,15 @@ export class ImageStickerProcessor {
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download media: ${String(err)}`);
     }
 
-    if (!(await validateImageContent(filePath))) {
-      throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Invalid image content');
-    }
+    try {
+      if (!(await validateImageContent(filePath))) {
+        throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Invalid image content');
+      }
 
-    return { filePath, mimeType };
+      return { filePath, mimeType };
+    } catch (err) {
+      cleanupTempFile(filePath);
+      throw err;
+    }
   }
 }

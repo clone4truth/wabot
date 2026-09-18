@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll } from 'vitest';
 import Sharp from 'sharp';
 import fs from 'fs';
 import { ImageStickerProcessor } from '../../src/stickers/processors/image.processor';
+import { ErrorCode } from '../../src/errors/error-codes';
 
 const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
 vi.mock('../../src/media/downloader', () => ({
@@ -61,5 +62,18 @@ describe('ImageStickerProcessor circle mask', () => {
     // Contain: bar transparan di kiri-kanan.
     expect(await alphaAt(result.buffer, 0.01, 0.5)).toBe(0);
     expect(await alphaAt(result.buffer, 0.5, 0.5)).toBeGreaterThan(200);
+  });
+
+  it('gambar invalid konten -> MEDIA_DECODE_FAILED dan file temp langsung dibersihkan', async () => {
+    const p = `/tmp/test_invalid_img_${Date.now()}_${counter++}.jpg`;
+    fs.writeFileSync(p, Buffer.from('bukan-file-gambar-yang-bisa-didecode'));
+    dlMock.downloadMedia.mockResolvedValueOnce({ filePath: p, mimeType: 'image/jpeg', size: 36 });
+
+    await expect(new ImageStickerProcessor().process('http://x/invalid.jpg')).rejects.toMatchObject({
+      code: ErrorCode.MEDIA_DECODE_FAILED,
+    });
+
+    // File temp harus langsung tidak ada di filesystem (tanpa menunggu TTL)
+    expect(fs.existsSync(p)).toBe(false);
   });
 });

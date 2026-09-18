@@ -1,7 +1,7 @@
 import Sharp from 'sharp';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { escapeXml, wrapWords } from './text-utils';
+import { escapeXml, wrapWords, countGraphemes, sliceGraphemes } from './text-utils';
 
 // Palet warna nama ala WhatsApp.
 const NAME_COLORS = ['#ff8fab', '#ffb86b', '#ffd60a', '#7bed6f', '#4cc9f0', '#b892ff', '#ff6b6b', '#4dd0a6'];
@@ -61,9 +61,9 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const nameColor = senderColor(senderId || senderName);
   const quotedColor = senderColor(quoted?.senderId || quoted?.senderName || '?');
 
-  // Preview kutipan: sengaja dibatasi maksimal 140 karakter Unicode untuk ringkasan UI chat WhatsApp.
-  const quotedRaw = quoted ? Array.from(quoted.body).slice(0, 140).join('') : '';
-  const quotedSuffix = quoted && Array.from(quoted.body).length > 140 ? '...' : '';
+  // Preview kutipan: sengaja dibatasi maksimal 140 grapheme cluster untuk ringkasan UI chat WhatsApp.
+  const quotedRaw = quoted ? sliceGraphemes(quoted.body, 0, 140) : '';
+  const quotedSuffix = quoted && countGraphemes(quoted.body) > 140 ? '...' : '';
   const quotedPreview = quoted ? `${quotedRaw}${quotedSuffix}` : '';
   const quotedLines = quoted ? wrapWords(quotedPreview, Math.max(4, Math.floor(innerW / (quoteBodySize * 0.62)) - 4), 2) : [];
 

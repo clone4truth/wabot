@@ -24,6 +24,16 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'text.webp'), textRes.buffer);
   console.log('✓ text.webp');
 
+  // 1b. Complex Emoji & Graphemes
+  const emojiRes = await textProc.process('👨‍👩‍👧‍👦 Keluarga Bahagia ❤️ 🇮🇩 Indonesia');
+  fs.writeFileSync(path.join(outDir, 'emoji.webp'), emojiRes.buffer);
+  console.log('✓ emoji.webp');
+
+  // 1c. Long Text without Silent Truncation
+  const longTextRes = await textProc.process('Stiker teks panjang adaptif '.repeat(7) + ' ' + 'a'.repeat(40));
+  fs.writeFileSync(path.join(outDir, 'long-text.webp'), longTextRes.buffer);
+  console.log('✓ long-text.webp');
+
   // 2. Chat Bubble
   const bubbleProc = new BubbleProcessor();
   const bubbleRes = await bubbleProc.process('Pesan bubble WhatsApp dengan layout adaptif', 'Seno', '123@lid');

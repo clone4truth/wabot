@@ -21,6 +21,7 @@ export interface LogEntry {
 }
 
 export interface Logger {
+  debug(message: string, meta?: LogEntry): void;
   info(message: string, meta?: LogEntry): void;
   warn(message: string, meta?: LogEntry): void;
   error(message: string, meta?: LogEntry): void;
@@ -47,6 +48,13 @@ export function createLogger(baseMeta: Record<string, unknown> = {}): Logger {
   const prefix = baseMeta.component ? `[${baseMeta.component}] ` : '';
 
   return {
+    debug(message: string, meta: LogEntry = {}) {
+      if (process.env.LOG_LEVEL === 'debug') {
+        const entry = { ...baseMeta, ...meta, level: 'debug', message };
+        store(entry);
+        console.debug(JSON.stringify(entry));
+      }
+    },
     info(message: string, meta: LogEntry = {}) {
       const entry = { ...baseMeta, ...meta, level: 'info', message };
       store(entry);

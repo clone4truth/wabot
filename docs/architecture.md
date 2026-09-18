@@ -69,7 +69,8 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **TempFiles**: Create, cleanup, orphan cleanup
 
 ### Layer 7: Rendering
-- **TextLayout**: SVG text rendering + outline paint-order + adaptive fitted sizing
+- **TextLayout**: SVG text rendering + outline paint-order + adaptive fitted sizing dengan validasi 2-level (logical layout bounds + actual rendered pixel trim bounds).
+- **TextUtils**: Grapheme-safe Unicode processing via `Intl.Segmenter` (cluster-safe counting, slicing, dan word-wrapping tanpa silent truncation). Batas teks ditegakkan berdasarkan user-perceived characters (grapheme clusters), bukan raw UTF-16 code units.
 - **Fonts**: DejaVu + Noto + Noto Emoji (fontconfig fallback)
 
 ## Configuration

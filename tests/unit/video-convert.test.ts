@@ -209,5 +209,44 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
       code: ErrorCode.UNSUPPORTED_STICKER_TYPE,
     });
   });
+
+  it('!togif: uneven frame delays preserves total duration approximately', async () => {
+    const tmpWebpDir = path.join(workdir, 'uneven-test');
+    fs.mkdirSync(tmpWebpDir, { recursive: true });
+    execSync(`ffmpeg -y -loglevel error -f lavfi -i color=c=red:s=64x64 -frames:v 1 ${tmpWebpDir}/0.png`);
+    execSync(`ffmpeg -y -loglevel error -f lavfi -i color=c=blue:s=64x64 -frames:v 1 ${tmpWebpDir}/1.png`);
+    execSync(`ffmpeg -y -loglevel error -f lavfi -i color=c=green:s=64x64 -frames:v 1 ${tmpWebpDir}/2.png`);
+
+    const concatContent = [
+      "file '0.png'",
+      "duration 0.05",
+      "file '1.png'",
+      "duration 0.30",
+      "file '2.png'",
+      "duration 0.10",
+      "file '2.png'",
+    ].join('\n');
+    fs.writeFileSync(path.join(tmpWebpDir, 'frames.txt'), concatContent);
+
+    const unevenWebpPath = path.join(tmpWebpDir, 'uneven.webp');
+    execSync(`ffmpeg -y -loglevel error -f concat -safe 0 -i ${tmpWebpDir}/frames.txt -c:v libwebp -loop 0 -an ${unevenWebpPath}`);
+    const unevenWebpBuffer = fs.readFileSync(unevenWebpPath);
+
+    const result = await new ToGifProcessor().process(unevenWebpBuffer);
+    expect(result.mimetype).toBe('video/mp4');
+
+    const { getVideoMetadata } = await import('../../src/media/ffmpeg');
+    const tmpMp4 = path.join(workdir, `uneven_out_${Date.now()}.mp4`);
+    fs.writeFileSync(tmpMp4, result.buffer);
+    try {
+      const meta = await getVideoMetadata(tmpMp4);
+      // Expected duration adalah ~0.45s (toleransi 0.35s - 0.65s)
+      expect(meta.duration).toBeGreaterThan(0.35);
+      expect(meta.duration).toBeLessThan(0.65);
+    } finally {
+      if (fs.existsSync(tmpMp4)) fs.unlinkSync(tmpMp4);
+      fs.rmSync(tmpWebpDir, { recursive: true, force: true });
+    }
+  }, 120000);
 });
 
