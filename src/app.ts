@@ -9,6 +9,7 @@ const fastify = Fastify({
   bodyLimit: 1_048_576,
 });
 
+fastify.post('/webhooks', { bodyLimit: 1_048_576 }, webhookController);
 fastify.post('/webhook', { bodyLimit: 1_048_576 }, webhookController);
 fastify.get('/health', healthController);
 fastify.get('/dashboard', dashboardController);
