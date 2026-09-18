@@ -4,19 +4,10 @@ services:
     ports:
       - "127.0.0.1:3001:3000"
     environment:
-      - WAHA_BASE_URL=http://waha:3001
+      - WAHA_BASE_URL=http://localhost:3001
       - WAHA_API_KEY=${WAHA_API_KEY}
       - WAHA_SESSION=${WAHA_SESSION}
       - WAHA_WEBHOOK_HMAC_KEY=${WAHA_WEBHOOK_HMAC_KEY}
       - APP_ENV=production
       - LOG_LEVEL=warn
-    depends_on:
-      - waha
-    restart: unless-stopped
-
-  waha:
-    image: devlikeapro/waha:latest
-    environment:
-      - WAHA_API_KEY=${WAHA_API_KEY}
-      - WAHA_SESSION=${WAHA_SESSION}
     restart: unless-stopped
