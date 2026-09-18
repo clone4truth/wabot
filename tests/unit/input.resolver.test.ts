@@ -111,6 +111,29 @@ describe('InputResolver', () => {
     expect(resolver.resolve({ command: '!attp', args: '' })).toBe(null);
   });
 
+  it('reply text + modifier bubble/quote dipertahankan', () => {
+    const bubble = resolver.resolve({
+      command: '!stiker', args: 'bubble', modifier: 'bubble',
+      reply: { body: 'halo', senderName: 'A' },
+    });
+    expect(bubble?.type).toBe('text');
+    expect(bubble?.modifier).toBe('bubble');
+
+    const quote = resolver.resolve({
+      command: '!stiker', args: 'quote', modifier: 'quote',
+      reply: { body: 'halo', senderName: 'A' },
+    });
+    expect(quote?.modifier).toBe('quote');
+  });
+
+  it('reply image + meme -> meme (prioritas reply)', () => {
+    const meme = resolver.resolve({
+      command: '!stiker', args: 'A | B', modifier: 'meme',
+      reply: { media: { url: 'http://x/a.jpg', mimetype: 'image/jpeg' } },
+    });
+    expect(meme?.type).toBe('meme');
+  });
+
   it('tanpa input -> null; command lain -> null', () => {
     expect(resolver.resolve({ command: '!stiker', args: '' })?.type ?? null).toBe(null);
     expect(resolver.resolve({ command: '!ping', args: '' })).toBe(null);

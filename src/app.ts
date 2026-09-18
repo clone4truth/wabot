@@ -1,10 +1,9 @@
 import Fastify from 'fastify';
 import { Readable } from 'stream';
 import { webhookController } from './http/webhook.controller';
-import { healthController } from './http/health.controller';
+import { healthController, readyController } from './http/health.controller';
 import { dashboardController } from './http/dashboard.controller';
 import { logsController } from './http/logs.controller';
-import { logger } from './observability/logger';
 import env from './config/env';
 
 const fastify = Fastify({
@@ -25,7 +24,21 @@ fastify.addHook('preParsing', async (request, _reply, payload) => {
 
 fastify.post('/webhooks', { bodyLimit: 1_048_576 }, webhookController);
 fastify.get('/health', healthController);
-fastify.get('/dashboard', dashboardController);
-fastify.get('/api/logs', logsController);
+fastify.get('/ready', readyController);
+
+// Dashboard + log API hanya di non-production (hindari ekspos internal).
+// Gate per-request agar bisa diuji via perubahan env.appEnv.
+fastify.get('/dashboard', (request, reply) => {
+  if (env.appEnv === 'production') {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  return dashboardController(request, reply);
+});
+fastify.get('/api/logs', (request, reply) => {
+  if (env.appEnv === 'production') {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  return logsController(request, reply);
+});
 
 export { fastify };

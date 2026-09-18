@@ -27,8 +27,6 @@ export interface EnvConfig {
   tempDir: string;
   tempFileTtlSeconds: number;
   dataDir: string;
-  mediaCacheTtlSeconds: number;
-  mediaCacheMaxBytes: number;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -60,8 +58,6 @@ const env: EnvConfig = {
   tempDir: process.env.TEMP_DIR || '/tmp/waha-sticker-bot',
   tempFileTtlSeconds: Number(process.env.TEMP_FILE_TTL_SECONDS) || 300,
   dataDir: process.env.DATA_DIR || './data',
-  mediaCacheTtlSeconds: Number(process.env.MEDIA_CACHE_TTL_SECONDS) || 86400,
-  mediaCacheMaxBytes: Number(process.env.MEDIA_CACHE_MAX_BYTES) || 500 * 1024 * 1024,
 };
 
 export default env;

@@ -7,6 +7,26 @@ export interface StickerResult {
   size: number;
 }
 
+export interface ImageResult {
+  buffer: Buffer;
+  mimetype: 'image/png';
+  width: number;
+  height: number;
+  animated: false;
+  size: number;
+}
+
+export interface VideoResult {
+  buffer: Buffer;
+  mimetype: 'video/mp4';
+  width: number;
+  height: number;
+  animated: true;
+  size: number;
+}
+
+export type ProcessingResult = StickerResult | ImageResult | VideoResult;
+
 export function createStickerResult(
   buffer: Buffer,
   width: number,

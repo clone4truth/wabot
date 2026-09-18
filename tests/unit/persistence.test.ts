@@ -46,35 +46,55 @@ describe('JsonFileStore', () => {
   });
 });
 
-describe('IdempotencyGuard persisten', () => {
-  it('duplikat terdeteksi lintas restart', () => {
-    const dir = tmpDir();
-    const first = new IdempotencyGuard(60_000, 100, new JsonFileStore(dir, 's.json', 10_000));
-    first.markProcessed('evt-1');
-    expect(first.isDuplicate('evt-1')).toBe(true);
-    first.flush();
+describe('IdempotencyGuard states (in-memory)', () => {
+  it('sukses dua kali -> kedua diabaikan', () => {
+    const guard = new IdempotencyGuard();
+    expect(guard.isDuplicate('evt-1')).toBe(false);
+    guard.markProcessing('evt-1');
+    expect(guard.isDuplicate('evt-1')).toBe(true);
+    guard.markDone('evt-1');
+    expect(guard.isDuplicate('evt-1')).toBe(true);
+  });
 
-    const second = new IdempotencyGuard(60_000, 100, new JsonFileStore(dir, 's.json', 10_000));
-    expect(second.isDuplicate('evt-1')).toBe(true);
-    expect(second.isDuplicate('evt-lain')).toBe(false);
+  it('gagal pertama -> retry boleh proses lagi', () => {
+    const guard = new IdempotencyGuard();
+    guard.markProcessing('evt-2');
+    guard.markFailed('evt-2');
+    expect(guard.isDuplicate('evt-2')).toBe(false);
+  });
+
+  it('duplikat konkuren -> hanya satu mengeksekusi', async () => {
+    const guard = new IdempotencyGuard();
+    let executions = 0;
+    async function handle(key: string): Promise<string> {
+      if (guard.isDuplicate(key)) return 'ignored';
+      guard.markProcessing(key);
+      await new Promise((r) => setTimeout(r, 20));
+      executions++;
+      guard.markDone(key);
+      return 'executed';
+    }
+    const [a, b] = await Promise.all([handle('evt-3'), handle('evt-3')]);
+    expect(executions).toBe(1);
+    expect([a, b].sort()).toEqual(['executed', 'ignored']);
+  });
+
+  it('TTL kedaluwarsa -> boleh lagi', async () => {
+    const guard = new IdempotencyGuard(10);
+    guard.markProcessing('evt-4');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(guard.isDuplicate('evt-4')).toBe(false);
   });
 });
 
-describe('MemoryRateLimiter persisten', () => {
-  it('hitungan jendela lanjut setelah restart', async () => {
-    const dir = tmpDir();
-    const mk = () => new MemoryRateLimiter(new JsonFileStore(dir, 's.json', 10_000));
-    const first = mk();
-    // Habiskan kuota user sampai diblokir (batas diambil dari env).
+describe('MemoryRateLimiter (in-memory)', () => {
+  it('batas berlaku dalam satu window', async () => {
+    const limiter = new MemoryRateLimiter();
     let blocked = false;
     for (let i = 0; i < 5000 && !blocked; i++) {
-      blocked = !(await first.consume('persist-user')).allowed;
+      blocked = !(await limiter.consume('user-x')).allowed;
     }
     expect(blocked).toBe(true);
-    first.flush();
-
-    const second = mk();
-    expect((await second.consume('persist-user')).allowed).toBe(false);
-    expect((await second.consume('user-lain')).allowed).toBe(true);
+    expect((await limiter.consume('user-lain')).allowed).toBe(true);
   });
 });

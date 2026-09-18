@@ -1,46 +1,73 @@
-import env from '../config/env';
-import { JsonFileStore, getSharedStore } from '../storage/json-store';
+type EntryState = 'processing' | 'done';
 
+interface Entry {
+  state: EntryState;
+  expiresAt: number;
+}
+
+// Idempotency in-memory dengan state:
+// PROCESSING = sedang diproses (duplikat konkuren diabaikan),
+// DONE = sukses (retry diabaikan), gagal = state dihapus agar boleh retry.
 export class IdempotencyGuard {
-  private readonly store: JsonFileStore;
+  private cache = new Map<string, Entry>();
 
   constructor(
     private readonly ttlMs: number = 24 * 60 * 60 * 1000,
     private readonly maxSize: number = 10_000,
-    store?: JsonFileStore,
-  ) {
-    this.store = store ?? getSharedStore(env.dataDir);
-  }
+  ) {}
 
-  private namespaced(key: string): string {
-    return `idem:${key}`;
+  private get(key: string): Entry | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry;
   }
 
   isDuplicate(key: string): boolean {
-    return this.store.get(this.namespaced(key)) === true;
+    return this.get(key) !== undefined;
   }
 
+  isProcessing(key: string): boolean {
+    return this.get(key)?.state === 'processing';
+  }
+
+  markProcessing(key: string): void {
+    this.evictIfFull();
+    this.cache.set(key, { state: 'processing', expiresAt: Date.now() + this.ttlMs });
+  }
+
+  markDone(key: string): void {
+    this.cache.set(key, { state: 'done', expiresAt: Date.now() + this.ttlMs });
+  }
+
+  markFailed(key: string): void {
+    this.cache.delete(key);
+  }
+
+  // Kompatibilitas: tandai langsung DONE (dipakai bila state rinci tak perlu).
   markProcessed(key: string): void {
     this.evictIfFull();
-    this.store.set(this.namespaced(key), true, this.ttlMs);
+    this.cache.set(key, { state: 'done', expiresAt: Date.now() + this.ttlMs });
   }
 
   private evictIfFull(): void {
-    const keys = this.store.keys().filter((k) => k.startsWith('idem:'));
-    if (keys.length < this.maxSize) return;
-    // Hapus yang kedaluwarsa dulu, lalu yang tertua bila masih penuh.
-    this.store.prune();
-    const remaining = this.store.keys().filter((k) => k.startsWith('idem:'));
-    for (let i = 0; i <= remaining.length - this.maxSize; i++) {
-      this.store.delete(remaining[i]);
+    this.evictExpired();
+    if (this.cache.size < this.maxSize) return;
+    const oldest = Array.from(this.cache.entries()).sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0]?.[0];
+    if (oldest) this.cache.delete(oldest);
+  }
+
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now > entry.expiresAt) this.cache.delete(key);
     }
   }
 
   get size(): number {
-    return this.store.keys().filter((k) => k.startsWith('idem:')).length;
-  }
-
-  flush(): void {
-    this.store.flush();
+    return this.cache.size;
   }
 }

@@ -30,7 +30,7 @@ export async function validateMediaFile(
     }
     return { valid: false };
   } catch (err) {
-    logger.warn('Media validation failed', { filePath, error: String(err) });
+    logger.warn('Media validation failed', { error: String(err) });
     return { valid: false };
   }
 }

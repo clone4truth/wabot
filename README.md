@@ -26,11 +26,23 @@ Bot WhatsApp untuk pembuatan dan konversi stiker menggunakan WAHA (WhatsApp HTTP
 | `!stiker bubble` | Stiker bubble |
 | `!stiker meme <atas> \| <bawah>` | Stiker meme |
 | `!stiker teks <teks>` | Paksa mode teks |
+| `!ttp <teks>` | Stiker teks gradien (ekstensi V1.1) |
+| `!attp <teks>` | Stiker teks animasi (ekstensi V1.1) |
+| `!prefix [simbol]` | Lihat/ubah prefix chat ini (ekstensi) |
 | `!toimg` | Konversi sticker static ke gambar |
 | `!togif` | Konversi animated sticker ke video |
 | `!menu` | Daftar command |
 | `!help` | Bantuan |
 | `!ping` | Cek status bot |
+
+## Keamanan & Perilaku V1
+
+- **Webhook HMAC mandatory**: jika `WAHA_WEBHOOK_HMAC_KEY` diisi, request tanpa/tanda tangan salah ditolak (403). Kosongkan hanya untuk development.
+- **Privacy logging**: log production hanya berisi hash identifier (tanpa nomor/isi pesan mentah).
+- **Dashboard & `/api/logs`**: aktif hanya di non-production. `/health` publik minimal, `/ready` untuk status WAHA.
+- **Rate limit**: 8/menit per user DAN 30/menit per grup (berlaku bersamaan di grup).
+- **Media**: tanpa cache persisten — download → proses → kirim → hapus (maks 5 menit).
+- **Akses default**: open access (private + group). Opsional: `ALLOWED_CHAT_IDS`, `BLOCKED_SENDER_IDS`, `GROUP_ADMIN_ONLY`.
 
 ## Instalasi
 

@@ -17,7 +17,7 @@ export function cleanupTempFile(filePath: string): void {
       fs.unlinkSync(filePath);
     }
   } catch (err) {
-    logger.warn('Failed to cleanup temp file', { filePath, error: String(err) });
+    logger.warn('Failed to cleanup temp file', { error: String(err) });
   }
 }
 

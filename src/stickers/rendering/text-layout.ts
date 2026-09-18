@@ -1,4 +1,7 @@
 import { getDefaultFontPath, getFontFamily } from './fonts';
+import { AppError } from '../../errors/app-error';
+import { ErrorCode } from '../../errors/error-codes';
+import { wrapText } from './chat-bubble';
 import Sharp from 'sharp';
 
 export interface TextLayoutOptions {
@@ -19,6 +22,59 @@ export function escapePangoMarkup(text: string): string {
   return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+export interface FittedTextOptions extends TextLayoutOptions {
+  minFontSize?: number;
+  maxFontSize?: number;
+  margin?: number;
+}
+
+function escapeXml(text: string): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function renderSingleLine(
+  text: string,
+  maxWidth: number,
+  maxHeight: number,
+  fontSize: number,
+  color: string,
+  align: 'left' | 'center' | 'right',
+  outlineColor: string,
+  outlineWidth: number,
+): Promise<Buffer> {
+  // Render via SVG: ukuran font presisi dalam px (Pango/sharp me-render
+  // font_desc raksasa yang tak terprediksi). Outline via paint-order stroke.
+  const family = getFontFamily(getDefaultFontPath());
+  const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
+  const ax = align === 'left' ? 0 : align === 'right' ? maxWidth : maxWidth / 2;
+  const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.62)));
+  const lines = wrapText(text, maxChars, 20);
+  const lh = Math.round(fontSize * 1.25);
+  const totalH = lines.length * lh;
+  const startY = Math.max(0, Math.round((maxHeight - totalH) / 2));
+  const stroke = outlineWidth > 0 && outlineColor !== 'transparent'
+    ? ` stroke="${outlineColor}" stroke-width="${Math.round(outlineWidth * 2)}" paint-order="stroke"`
+    : '';
+
+  const texts = lines
+    .map((line, i) => {
+      const y = startY + i * lh + Math.round(fontSize * 0.85);
+      return `<text x="${ax}" y="${y}" text-anchor="${anchor}" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
+    })
+    .join('');
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}">` +
+    texts +
+    `</svg>`;
+
+  return Sharp(Buffer.from(svg)).png().toBuffer();
+}
+
 export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Buffer> {
   const {
     text,
@@ -31,44 +87,43 @@ export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Bu
     align = 'center',
   } = options;
 
-  const fontPath = getDefaultFontPath();
-  const family = getFontFamily(fontPath);
-
-  // Hanya atribut Pango yang valid: font_desc + foreground.
-  // "stroke"/"stroke-width" bukan atribut Pango -> menyebabkan "invalid markup".
-  const pangoMarkup = `<span font_desc="${family} ${fontSize}" foreground="${color}">${escapePangoMarkup(text)}</span>`;
-
-  const overlay = {
-    text: {
-      text: pangoMarkup,
-      font: family,
-      fontfile: fontPath,
-      width: maxWidth,
-      height: maxHeight,
-      align,
-      rgba: true,
-    },
-  };
-
-  const buffer = await Sharp({
-    create: { width: maxWidth, height: maxHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-  })
-    .composite([{ input: overlay, gravity: 'center' }])
-    .png()
-    .toBuffer();
-
-  return buffer;
+  // Outline di-render langsung oleh SVG (paint-order stroke).
+  return renderSingleLine(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth);
 }
 
-export function calculateFontSize(text: string, maxWidth: number, maxHeight: number): number {
-  let fontSize = 64;
-  while (fontSize > 8) {
-    const estimatedWidth = text.length * fontSize * 0.6;
-    const estimatedHeight = fontSize;
-    if (estimatedWidth <= maxWidth && estimatedHeight <= maxHeight) {
-      break;
+export interface FittedTextResult {
+  buffer: Buffer;
+  fontSize: number;
+}
+
+// Cari font terbesar agar hasil render aktual muat di safe area.
+// Ukur via trim box nyata, bukan estimasi panjang karakter.
+export async function renderFittedText(options: FittedTextOptions): Promise<FittedTextResult> {
+  const {
+    maxWidth,
+    maxHeight,
+    margin = 16,
+    minFontSize = 16,
+    maxFontSize = 96,
+  } = options;
+  const safeW = maxWidth - margin * 2;
+  const safeH = maxHeight - margin * 2;
+
+  let lastError: unknown = null;
+  for (let size = maxFontSize; size >= minFontSize; size -= 8) {
+    try {
+      const buffer = await renderTextToBuffer({ ...options, fontSize: size });
+      const { info } = await Sharp(buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+      if (info.width <= safeW && info.height <= safeH) {
+        return { buffer, fontSize: size };
+      }
+      lastError = new Error(`overflow at ${size}`);
+    } catch (err) {
+      lastError = err;
     }
-    fontSize -= 1;
   }
-  return fontSize;
+  throw new AppError(
+    ErrorCode.TEXT_TOO_LONG,
+    `Teks tidak muat dijadikan stiker: ${String((lastError as Error)?.message || lastError)}`,
+  );
 }

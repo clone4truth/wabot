@@ -17,9 +17,11 @@ import { handlePing } from '../commands/ping.handler';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AccessGuard } from '../security/access';
 import { AppError } from '../errors/app-error';
-import { ErrorCode } from '../errors/error-codes';
+import { ErrorCode, userMessages } from '../errors/error-codes';
+import { ProcessingResult } from '../stickers/result';
 import env from '../config/env';
 import { logger } from '../observability/logger';
+import { hashIdentifier } from '../observability/privacy';
 
 const verifier = new WebhookVerifier();
 const normalizer = new MessageNormalizer();
@@ -49,22 +51,16 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     const wahaAlgo = (request.headers['x-webhook-hmac-algorithm'] as string | undefined) || 'sha512';
     const hubSig = (request.headers['x-hub-signature-256'] as string | undefined) || '';
 
-    // WAHA hanya mengirim header HMAC bila HMAC Key diisi. Tanpa header = lewati verifikasi.
-    if (env.wahaWebhookHmacKey && (wahaHmac || hubSig)) {
+    // HMAC key kosong -> mode development, verifikasi dilewati.
+    // HMAC key tersedia -> signature mandatory: tidak ada / tidak valid = reject.
+    if (env.wahaWebhookHmacKey) {
       const verifyResult = wahaHmac
         ? verifier.verifyWaha(body, wahaHmac, wahaAlgo)
-        : verifier.verify(body, hubSig);
+        : hubSig
+          ? verifier.verify(body, hubSig)
+          : { valid: false } as const;
       if (!verifyResult.valid) {
-        logger.warn('Invalid webhook signature', {
-          requestId: request.id,
-          wahaAlgo,
-          wahaHmacPrefix: wahaHmac ? wahaHmac.slice(0, 20) : '(empty)',
-          hubSigPrefix: hubSig ? hubSig.slice(0, 20) : '(empty)',
-          expectedPrefix: verifyResult.expected?.slice(0, 20) || 'N/A',
-          receivedPrefix: verifyResult.received?.slice(0, 20) || 'N/A',
-          bodyLength: body.length,
-          hmacKeySet: !!env.wahaWebhookHmacKey,
-        });
+        logger.warn('Invalid webhook signature', { requestId: request.id });
         throw new AppError(ErrorCode.INVALID_WEBHOOK_SIGNATURE, 'Invalid webhook signature');
       }
     }
@@ -77,18 +73,13 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 
     const message = normalizer.normalize(payload);
 
-    const raw = (payload as any).payload as any;
     logger.info('Incoming message', {
       requestId: request.id,
-      chatId: message.chatId,
-      senderId: message.senderId,
+      session: payload.session,
+      chatIdHash: hashIdentifier(message.chatId),
+      senderIdHash: hashIdentifier(message.senderId),
       isGroup: message.isGroup,
       fromMe: message.fromMe,
-      rawFrom: raw?.from,
-      rawTo: raw?.to,
-      rawParticipant: raw?.participant,
-      rawSender: raw?.sender?.id || raw?.sender,
-      bodyPrefix: message.body.slice(0, 30),
     });
 
     const prefix = accessGuard.resolvePrefix(message.chatId);
@@ -107,9 +98,13 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       return reply.code(200).send({ status: 'ok', denied: access.reason });
     }
 
-    const rateKey = message.isGroup ? `group:${message.chatId}` : message.senderId;
-    const rateResult = await rateLimiter.consume(rateKey);
-    if (!rateResult.allowed) {
+    // PRD: private -> user limit; group -> user limit DAN group limit.
+    const userResult = await rateLimiter.consume(`user:${message.senderId}`);
+    let groupResult = { allowed: true, remaining: 0, resetAt: 0 };
+    if (message.isGroup) {
+      groupResult = await rateLimiter.consume(`group:${message.chatId}`);
+    }
+    if (!userResult.allowed || !groupResult.allowed) {
       // Sudah ditangani (balas peringatan) -> 200 agar WAHA tidak me-retry.
       await wahaClient.sendText(message.chatId, '⏳ Terlalu banyak permintaan. Coba lagi beberapa saat.');
       return reply.code(200).send({ status: 'rate_limited' });
@@ -117,7 +112,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 
     const idempotencyKey = `${message.eventId}`;
     if (idempotency.isDuplicate(idempotencyKey)) {
-      logger.info('Duplicate webhook detected', { eventId: message.eventId });
+      logger.info('Duplicate webhook detected', { messageIdHash: hashIdentifier(message.eventId) });
       return reply.code(200).send({ status: 'ok', duplicate: true });
     }
 
@@ -126,13 +121,20 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
       return reply.code(200).send({ status: 'ok' });
     }
 
-    idempotency.markProcessed(idempotencyKey);
+    idempotency.markProcessing(idempotencyKey);
 
-    const result = await dispatchCommand(parsed, message);
+    try {
+      await dispatchCommand(parsed, message);
+    } catch (err) {
+      // Gagal -> state dihapus agar retry WAHA boleh memproses lagi.
+      idempotency.markFailed(idempotencyKey);
+      throw err;
+    }
+    idempotency.markDone(idempotencyKey);
 
     logger.info('Webhook processed', {
       requestId: request.id,
-      messageIdHash: message.messageId,
+      messageIdHash: hashIdentifier(message.messageId),
       command: parsed.name,
       processingDurationMs: Date.now() - startTime,
       success: true,
@@ -182,7 +184,7 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
       await handlePrefixCommand(message, parsed.args.trim(), replyTo);
       break;
     default:
-      let result: any;
+      let result: ProcessingResult | null | undefined;
       try {
         result = await commandRouter.dispatch(parsed, {
           ...message,
@@ -191,7 +193,8 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
         });
       } catch (err: any) {
         if (err instanceof AppError) {
-          await wahaClient.sendText(message.chatId, err.message, replyTo);
+          // Hanya pesan user yang stabil (Bahasa Indonesia); detail internal tetap di log.
+          await wahaClient.sendText(message.chatId, userMessages[err.code] ?? '❌ Gagal membuat sticker.', replyTo);
           return;
         }
         throw err;

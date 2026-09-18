@@ -35,7 +35,7 @@ export async function convertVideoToAnimatedWebp(
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .outputOptions([
-        `-vf scale=${maxWidth}:-1:force_original_aspect_ratio=decrease`,
+        `-vf scale=${maxWidth}:${maxWidth}:force_original_aspect_ratio=decrease`,
         `-t ${maxDurationSec}`,
         `-r ${fps}`,
         '-c:v libwebp',
@@ -47,11 +47,11 @@ export async function convertVideoToAnimatedWebp(
       .outputOptions(['-an'])
       .outputFormat('webp')
       .on('end', () => {
-        logger.info('Video converted to animated WebP', { inputPath, outputPath });
+        logger.info('Video converted to animated WebP');
         resolve();
       })
       .on('error', (err: Error) => {
-        logger.error('FFmpeg conversion failed', { inputPath, error: String(err) });
+        logger.error('FFmpeg conversion failed', { error: String(err) });
         reject(err);
       })
       .save(outputPath);

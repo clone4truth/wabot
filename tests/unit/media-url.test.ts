@@ -99,54 +99,119 @@ describe('downloadMedia mengirim X-Api-Key (file WAHA butuh auth)', () => {
   });
 });
 
-describe('downloadMedia cache (hemat download berulang)', () => {
+
+describe('downloadMedia size limits + redirect SSRF', () => {
   let server: http.Server;
   let baseUrl: string;
   let savedBase: string;
   let savedKey: string;
-  let savedDataDir: string;
-  let hits = 0;
+  let savedImgMax: number;
+  let savedVidMax: number;
+
+  const jpeg = (size: number) => {
+    const buf = Buffer.alloc(size);
+    Buffer.from([0xff, 0xd8, 0xff]).copy(buf, 0);
+    return buf;
+  };
+  const mp4 = (size: number) => {
+    const buf = Buffer.alloc(size);
+    buf.write('ftyp', 4);
+    return buf;
+  };
 
   beforeAll(async () => {
     savedBase = env.wahaBaseUrl;
     savedKey = env.wahaApiKey;
-    savedDataDir = env.dataDir;
-    const img = await Sharp({
-      create: { width: 60, height: 60, channels: 3, background: { r: 9, g: 9, b: 9 } },
-    }).jpeg().toBuffer();
+    savedImgMax = env.maxImageBytes;
+    savedVidMax = env.maxVideoBytes;
+    env.maxImageBytes = 100;
+    env.maxVideoBytes = 200;
     server = http.createServer((req, res) => {
-      if (req.url === '/api/files/c.jpg' && req.headers['x-api-key'] === 'cache-key') {
-        hits++;
-        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-        res.end(img);
-      } else {
-        res.writeHead(401);
-        res.end('{}');
-      }
+      if (req.url === '/img100.jpg') { res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': 100 }); res.end(jpeg(100)); }
+      else if (req.url === '/img101.jpg') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); res.end(jpeg(101)); }
+      else if (req.url === '/vid200.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': 200 }); res.end(mp4(200)); }
+      else if (req.url === '/vid201.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); res.end(mp4(201)); }
+      else if (req.url === '/huge.jpg') { res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': 99999 }); res.end(jpeg(50)); }
+      else if (req.url === '/redir') { res.writeHead(302, { Location: '/img100.jpg' }); res.end(); }
+      else if (req.url === '/rel') { res.writeHead(302, { Location: 'img100.jpg' }); res.end(); }
+      else if (req.url === '/redir-evil') { res.writeHead(302, { Location: 'http://evil.invalid/x.jpg' }); res.end(); }
+      else if (req.url === '/loop') { res.writeHead(302, { Location: '/loop' }); res.end(); }
+      else { res.writeHead(404); res.end('{}'); }
     });
     await new Promise<void>((r) => server.listen(0, r));
     const port = (server.address() as AddressInfo).port;
     baseUrl = `http://localhost:${port}`;
     env.wahaBaseUrl = baseUrl;
-    env.wahaApiKey = 'cache-key';
-    const fs = await import('fs');
-    const os = await import('os');
-    const path = await import('path');
-    env.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mediacache-'));
+    env.wahaApiKey = 'k';
   });
 
   afterAll(async () => {
     env.wahaBaseUrl = savedBase;
     env.wahaApiKey = savedKey;
-    env.dataDir = savedDataDir;
+    env.maxImageBytes = savedImgMax;
+    env.maxVideoBytes = savedVidMax;
     await new Promise((r) => server.close(r));
   });
 
-  it('download kedua URL sama -> cache hit tanpa hit jaringan', async () => {
-    const first = await downloadMedia(`${baseUrl}/api/files/c.jpg`);
-    const second = await downloadMedia(`${baseUrl}/api/files/c.jpg`);
-    expect(hits).toBe(1);
-    expect(second.size).toBe(first.size);
-    expect(second.filePath).not.toBe(first.filePath);
+  it('image pas limit lolos, +1 ditolak', async () => {
+    const ok = await downloadMedia(`${baseUrl}/img100.jpg`);
+    expect(ok.size).toBe(100);
+    await expect(downloadMedia(`${baseUrl}/img101.jpg`)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
+  });
+
+  it('video pas limit lolos, +1 ditolak', async () => {
+    const ok = await downloadMedia(`${baseUrl}/vid200.mp4`);
+    expect(ok.size).toBe(200);
+    await expect(downloadMedia(`${baseUrl}/vid201.mp4`)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
+  });
+
+  it('Content-Length raksasa ditolak sebelum download', async () => {
+    await expect(downloadMedia(`${baseUrl}/huge.jpg`)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
+  });
+
+  it('batas produksi riil: image 15MB+ dan video 20MB+ ditolak', async () => {
+    env.maxImageBytes = 15 * 1024 * 1024;
+    env.maxVideoBytes = 20 * 1024 * 1024;
+    const bigJpg = (size: number) => {
+      const buf = Buffer.alloc(size);
+      Buffer.from([0xff, 0xd8, 0xff]).copy(buf, 0);
+      return buf;
+    };
+    const bigMp4 = (size: number) => {
+      const buf = Buffer.alloc(size);
+      buf.write('ftyp', 4);
+      return buf;
+    };
+    const srv = http.createServer((req, res) => {
+      if (req.url === '/big.jpg') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); res.end(bigJpg(15 * 1024 * 1024 + 1)); }
+      else if (req.url === '/big.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); res.end(bigMp4(20 * 1024 * 1024 + 1)); }
+      else { res.writeHead(404); res.end('{}'); }
+    });
+    await new Promise<void>((r) => srv.listen(0, r));
+    const port = (srv.address() as AddressInfo).port;
+    const savedBase = env.wahaBaseUrl;
+    env.wahaBaseUrl = `http://localhost:${port}`;
+    try {
+      await expect(downloadMedia(`${env.wahaBaseUrl}/big.jpg`)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
+      await expect(downloadMedia(`${env.wahaBaseUrl}/big.mp4`)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
+    } finally {
+      env.wahaBaseUrl = savedBase;
+      await new Promise((r) => srv.close(r));
+    }
+  }, 120000);
+
+  it('scheme non-http ditolak', async () => {
+    await expect(downloadMedia('file:///etc/passwd')).rejects.toThrow(/SSRF/);
+    await expect(downloadMedia('ftp://x/y.jpg')).rejects.toThrow(/SSRF/);
+  });
+
+  it('redirect se-origin + relatif diikuti', async () => {
+    expect((await downloadMedia(`${baseUrl}/redir`)).size).toBe(100);
+    expect((await downloadMedia(`${baseUrl}/rel`)).size).toBe(100);
+  });
+
+  it('redirect ke evil + loop ditolak', async () => {
+    await expect(downloadMedia(`${baseUrl}/redir-evil`)).rejects.toThrow(/SSRF|evil/);
+    await expect(downloadMedia(`${baseUrl}/loop`)).rejects.toThrow(/redirect/i);
   });
 });

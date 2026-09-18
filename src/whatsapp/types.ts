@@ -10,6 +10,7 @@ export interface WahaMessage {
   body: string;
   from: string;
   to?: string;
+  fromMe?: boolean;
   participant?: string;
   notifyName?: string;
   hasMedia?: boolean;

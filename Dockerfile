@@ -4,6 +4,8 @@ RUN apk add --no-cache \
     ffmpeg \
     fontconfig \
     ttf-dejavu \
+    font-noto \
+    font-noto-emoji \
     && fc-cache -f
 
 WORKDIR /app
@@ -23,6 +25,8 @@ RUN apk add --no-cache \
     ffmpeg \
     fontconfig \
     ttf-dejavu \
+    font-noto \
+    font-noto-emoji \
     && fc-cache -f
 
 WORKDIR /app

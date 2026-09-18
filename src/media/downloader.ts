@@ -1,10 +1,10 @@
 import { URL } from 'url';
-import crypto from 'crypto';
-import path from 'path';
-import fetch from 'node-fetch';
+import fetch, { Response } from 'node-fetch';
 import fs from 'fs';
 import { logger } from '../observability/logger';
 import env from '../config/env';
+import { AppError } from '../errors/app-error';
+import { ErrorCode } from '../errors/error-codes';
 import { validateMediaFile, isAllowedOrigin } from './validator';
 import { createTempFile, scheduleCleanup } from './temp-files';
 
@@ -14,121 +14,88 @@ export interface DownloadResult {
   size: number;
 }
 
-function cacheDir(): string {
-  const dir = path.join(env.dataDir, 'media-cache');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
+const MAX_REDIRECTS = 3;
+const FETCH_TIMEOUT_MS = 15_000;
 
-function cacheKey(url: string): string {
-  return crypto.createHash('sha256').update(url).digest('hex');
-}
-
-interface CacheMeta {
-  ext: string;
-  mimetype: string;
-  expiresAt: number;
-}
-
-function readMediaCache(url: string): DownloadResult | null {
+function assertHttpUrl(raw: string): URL {
+  let parsed: URL;
   try {
-    const key = cacheKey(url);
-    const dir = cacheDir();
-    const metaPath = path.join(dir, `${key}.json`);
-    const dataPath = path.join(dir, `${key}.bin`);
-    if (!fs.existsSync(metaPath) || !fs.existsSync(dataPath)) return null;
-    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as CacheMeta;
-    if (!meta || Date.now() > meta.expiresAt) {
-      fs.unlinkSync(metaPath);
-      fs.unlinkSync(dataPath);
-      return null;
-    }
-    // Salin ke temp file agar lifecycle cleanup pemanggil tidak menghapus cache.
-    const filePath = createTempFile(meta.ext || '.bin');
-    fs.copyFileSync(dataPath, filePath);
-    scheduleCleanup(filePath);
-    const stat = fs.statSync(filePath);
-    logger.info('Media cache hit', { size: stat.size });
-    return { filePath, mimeType: meta.mimetype, size: stat.size };
+    parsed = new URL(raw);
   } catch {
-    return null;
+    throw new Error(`SSRF violation: invalid URL`);
   }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`SSRF violation: scheme not allowed (${parsed.protocol})`);
+  }
+  return parsed;
 }
 
-function writeMediaCache(url: string, buffer: Buffer, mimetype: string, ext: string): void {
-  try {
-    const dir = cacheDir();
-    const key = cacheKey(url);
-    fs.writeFileSync(path.join(dir, `${key}.bin`), buffer);
-    const meta: CacheMeta = { ext, mimetype, expiresAt: Date.now() + env.mediaCacheTtlSeconds * 1000 };
-    fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify(meta));
-    pruneMediaCache(dir);
-  } catch (err) {
-    logger.warn('Gagal menulis media cache', { error: String(err) });
+// Fetch manual agar setiap redirect ikut divalidasi allowlist (tidak buta
+// mengikuti redirect ke host attacker).
+async function fetchValidated(url: string, remaining: number = MAX_REDIRECTS): Promise<Response> {
+  assertHttpUrl(url);
+  if (!isAllowedOrigin(url)) {
+    throw new Error(`SSRF violation: URL not allowed (${redactUrl(url)})`);
   }
-}
-
-function pruneMediaCache(dir: string): void {
-  try {
-    const bins = fs.readdirSync(dir).filter((f) => f.endsWith('.bin'));
-    let total = 0;
-    const entries = bins.map((f) => {
-      const p = path.join(dir, f);
-      const stat = fs.statSync(p);
-      total += stat.size;
-      return { path: p, meta: p.replace(/\.bin$/, '.json'), size: stat.size, mtime: stat.mtimeMs };
-    });
-    if (total <= env.mediaCacheMaxBytes) return;
-    entries.sort((a, b) => a.mtime - b.mtime);
-    for (const entry of entries) {
-      if (total <= env.mediaCacheMaxBytes) break;
-      try {
-        fs.unlinkSync(entry.path);
-        if (fs.existsSync(entry.meta)) fs.unlinkSync(entry.meta);
-        total -= entry.size;
-      } catch {
-        // lanjut
-      }
-    }
-  } catch {
-    // cache opsional, jangan gagalkan download
-  }
-}
-
-export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
-  const resolvedUrl = resolveMediaUrl(mediaUrl);
-  if (!isAllowedOrigin(resolvedUrl)) {
-    throw new Error(`SSRF violation: URL not allowed (${redactUrl(resolvedUrl)})`);
-  }
-
-  const cached = readMediaCache(resolvedUrl);
-  if (cached) return cached;
-
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  let response;
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    // File media di-host WAHA (/api/files/...) dan butuh API key.
-    response = await fetch(resolvedUrl, {
+    const response = await fetch(url, {
       signal: controller.signal,
+      redirect: 'manual',
       headers: { 'X-Api-Key': env.wahaApiKey },
     });
+    if (response.status >= 300 && response.status < 400) {
+      if (remaining <= 0) throw new Error('Too many redirects');
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Redirect tanpa Location');
+      await response.arrayBuffer().catch(() => {});
+      return fetchValidated(new URL(location, url).toString(), remaining - 1);
+    }
+    return response;
   } catch (err) {
+    if (err instanceof Error && /SSRF|redirect/i.test(err.message)) throw err;
     throw new Error(`Failed to download media: ${String(err)}`);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Baca body dengan batas byte aktual (jangan percaya Content-Length saja).
+async function readLimited(response: Response, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const body = response.body;
+  if (!body) throw new Error('Empty response body');
+  for await (const chunk of body as any) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
+  const resolvedUrl = resolveMediaUrl(mediaUrl);
+  const response = await fetchValidated(resolvedUrl);
 
   if (!response.ok) {
     throw new Error(`Failed to download media: ${response.status}`);
   }
 
   const contentType = response.headers.get('content-type') || 'application/octet-stream';
-  const buffer = await response.buffer();
-
-  if (buffer.length > env.maxImageBytes && buffer.length > env.maxVideoBytes) {
-    throw new Error('Downloaded media exceeds size limit');
+  // Batas streaming = yang terbesar agar tipe terdeteksi dulu dari magic bytes;
+  // batas spesifik tipe ditegakkan setelah magic terdeteksi.
+  const streamCap = Math.max(env.maxImageBytes, env.maxVideoBytes);
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > streamCap) {
+    throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
   }
+
+  const buffer = await readLimited(response, streamCap);
 
   const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? '.jpg'
     : contentType.includes('png') ? '.png'
@@ -147,9 +114,17 @@ export async function downloadMedia(mediaUrl: string): Promise<DownloadResult> {
     throw new Error('Downloaded file content validation failed');
   }
 
+  // Tegakkan limit spesifik tipe media aktual (bukan declared).
+  const typeCap = valid.detectedMime?.startsWith('video')
+    ? env.maxVideoBytes
+    : env.maxImageBytes;
+  if (buffer.length > typeCap) {
+    await fs.promises.unlink(filePath).catch(() => {});
+    throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
+  }
+
   scheduleCleanup(filePath);
-  logger.info('Media downloaded', { filePath, mimeType: contentType, size: buffer.length });
-  writeMediaCache(resolvedUrl, buffer, contentType, ext);
+  logger.info('Media downloaded', { mimeType: contentType, size: buffer.length });
 
   return { filePath, mimeType: contentType, size: buffer.length };
 }

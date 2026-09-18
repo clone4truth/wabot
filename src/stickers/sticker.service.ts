@@ -1,4 +1,4 @@
-import { StickerResult } from './result';
+import { ProcessingResult } from './result';
 import { BubbleProcessor } from './processors/bubble.processor';
 import { TextStickerProcessor } from './processors/text.processor';
 import { QuoteProcessor } from './processors/quote.processor';
@@ -53,7 +53,7 @@ export class StickerService {
     senderId: string;
     senderName?: string;
     isGroup: boolean;
-  }): Promise<StickerResult | null> {
+  }): Promise<ProcessingResult | null> {
     const { command, args, modifier, reply, media, senderName, senderId } = normalizedMessage;
     const input = this.inputResolver.resolve({ command, args, modifier, reply, media, senderName, senderId });
 
@@ -81,7 +81,7 @@ export class StickerService {
   }
 
   // Metadata pack WhatsApp (nama pack + emoji) untuk webp statis.
-  private async withPackMeta(result: StickerResult | null, inputType: string): Promise<StickerResult | null> {
+  private async withPackMeta(result: ProcessingResult | null, inputType: string): Promise<ProcessingResult | null> {
     if (!result || result.mimetype !== 'image/webp' || result.animated) return result;
     const emojis: Record<string, string[]> = {
       text: ['💬'],
@@ -100,50 +100,20 @@ export class StickerService {
   }
 
   // Ekstrak argumen primitif dari ResolvedInput sesuai signature tiap prosesor.
-  private async runProcessor(input: ResolvedInput): Promise<StickerResult | null> {
+  private async runProcessor(input: ResolvedInput): Promise<ProcessingResult | null> {
     const content = input.content;
 
     switch (input.type) {
       case 'text': {
         const text = content.text ?? '';
+        // Sesuai PRD: default = plain text; bubble/quote hanya bila eksplisit.
         if (input.modifier === 'quote') {
           return this.processors.quote.process(text, content.senderName);
         }
-        if (input.modifier === 'teks') {
-          return this.processors.plainText.process(text);
+        if (input.modifier === 'bubble') {
+          return this.processBubble(content);
         }
-        // Resolve nama tersimpan + info chat per ID unik (best-effort, paralel).
-        // Prioritas nama: kontak tersimpan > overview > pushName payload > ID.
-        const ids = [...new Set([content.senderId, content.quotedSenderId].filter(Boolean))] as string[];
-        const resolved = await Promise.all(
-          ids.map(async (id) => {
-            const [savedName, info] = await Promise.all([
-              this.wahaClient.getContactSavedName(id).catch(() => undefined),
-              this.wahaClient.getChatInfo(id).catch(() => null),
-            ]);
-            return { id, savedName, info };
-          }),
-        );
-        const byId = new Map(resolved.map((r) => [r.id, r]));
-        const sender = content.senderId ? byId.get(content.senderId) : undefined;
-        const quotedRes = content.quotedSenderId ? byId.get(content.quotedSenderId) : undefined;
-
-        const senderName = sender?.savedName || sender?.info?.name || content.senderName;
-        const quoted = content.quotedBody
-          ? {
-              senderName: quotedRes?.savedName || quotedRes?.info?.name || content.quotedSenderName || '?',
-              senderId: content.quotedSenderId,
-              body: content.quotedBody,
-            }
-          : undefined;
-
-        let avatar = sender?.info?.picture
-          ? await this.wahaClient.fetchImage(sender.info.picture).catch(() => null)
-          : null;
-        if (!avatar && content.senderId) {
-          avatar = await this.wahaClient.getProfilePicture(content.senderId).catch(() => null);
-        }
-        return this.processors.text.process(content.text ?? '', senderName, content.senderId, quoted, avatar);
+        return this.processors.plainText.process(text);
       }
       case 'image': {
         if (!content.mediaUrl) {
@@ -187,6 +157,40 @@ export class StickerService {
       default:
         throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'No processor for this input');
     }
+  }
+
+  // Stiker bubble eksplisit (!stiker bubble): nama + avatar + quote.
+  private async processBubble(content: ResolvedInput['content']) {
+    const ids = [...new Set([content.senderId, content.quotedSenderId].filter(Boolean))] as string[];
+    const resolved = await Promise.all(
+      ids.map(async (id) => {
+        const [savedName, info] = await Promise.all([
+          this.wahaClient.getContactSavedName(id).catch(() => undefined),
+          this.wahaClient.getChatInfo(id).catch(() => null),
+        ]);
+        return { id, savedName, info };
+      }),
+    );
+    const byId = new Map(resolved.map((r) => [r.id, r]));
+    const sender = content.senderId ? byId.get(content.senderId) : undefined;
+    const quotedRes = content.quotedSenderId ? byId.get(content.quotedSenderId) : undefined;
+
+    const senderName = sender?.savedName || sender?.info?.name || content.senderName;
+    const quoted = content.quotedBody
+      ? {
+          senderName: quotedRes?.savedName || quotedRes?.info?.name || content.quotedSenderName || '?',
+          senderId: content.quotedSenderId,
+          body: content.quotedBody,
+        }
+      : undefined;
+
+    let avatar = sender?.info?.picture
+      ? await this.wahaClient.fetchImage(sender.info.picture).catch(() => null)
+      : null;
+    if (!avatar && content.senderId) {
+      avatar = await this.wahaClient.getProfilePicture(content.senderId).catch(() => null);
+    }
+    return this.processors.text.process(content.text ?? '', senderName, content.senderId, quoted, avatar);
   }
 
   private getTimeout(inputType: string): number {

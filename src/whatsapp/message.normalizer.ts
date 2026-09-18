@@ -30,7 +30,7 @@ export class MessageNormalizer {
       senderId,
       senderName: MessageNormalizer.displayName(msg.notifyName || msg._data?.notifyName, senderId),
       isGroup,
-      fromMe: false,
+      fromMe: msg.fromMe === true,
       body: msg.body || '',
     };
 

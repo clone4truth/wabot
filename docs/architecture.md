@@ -10,7 +10,7 @@ WAHA Sticker Bot adalah bot WhatsApp berbasis modular monolith untuk pembuatan d
 - **Web Framework**: Fastify 5.x
 - **Image Processing**: Sharp 0.33.x
 - **Video Processing**: FFmpeg + fluent-ffmpeg
-- **Text Rendering**: Sharp Pango integration
+- **Text Rendering**: SVG text rendering via Sharp (presisi px; Pango tidak dipakai karena unit font tak terprediksi)
 - **WhatsApp Gateway**: WAHA (self-hosted REST API)
 - **HTTP Client**: node-fetch
 
@@ -18,8 +18,9 @@ WAHA Sticker Bot adalah bot WhatsApp berbasis modular monolith untuk pembuatan d
 
 ```
 WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
-→ IdempotencyGuard → CommandParser → RateLimiter → CommandRouter
-→ InputResolver → StickerProcessor → Result → WAHAClient → WhatsApp
+→ AccessGuard → RateLimiter (user + group) → IdempotencyGuard (PROCESSING/DONE)
+→ CommandParser → CommandRouter
+→ InputResolver → StickerProcessor → Result (+EXIF pack) → WAHAClient → WhatsApp
 ```
 
 ## Component Responsibilities
@@ -34,9 +35,9 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **MessageNormalizer**: Mengubah payload WAHA menjadi NormalizedMessage
 
 ### Layer 3: Security
-- **MemoryRateLimiter**: In-memory rate limiting per user/group
-- **IdempotencyGuard**: TTL cache untuk mencegah duplicate webhook processing
-- **SSRF Protection**: Host allowlist pada MediaDownloader
+- **MemoryRateLimiter**: In-memory rate limiting per user (8/mnt) + per group (30/mnt)
+- **IdempotencyGuard**: In-memory TTL cache dengan state PROCESSING/DONE
+- **SSRF Protection**: Host allowlist + validasi redirect pada MediaDownloader
 
 ### Layer 4: Core Business Logic
 - **StickerService**: Facade untuk semua sticker processors
@@ -61,8 +62,8 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **TempFiles**: Create, cleanup, orphan cleanup
 
 ### Layer 7: Rendering
-- **TextLayout**: Pango-based text rendering with Sharp composite
-- **Fonts**: Font fallback system
+- **TextLayout**: SVG text rendering + outline paint-order + adaptive fitted sizing
+- **Fonts**: DejaVu + Noto + Noto Emoji (fontconfig fallback)
 
 ## Configuration
 

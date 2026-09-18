@@ -89,6 +89,17 @@ describe('StickerService dispatcher', () => {
     if (fs.existsSync(jpgPath)) fs.unlinkSync(jpgPath);
   });
 
+  it('default text -> plain processor (bukan bubble ber-nama)', async () => {
+    const plain = await service.process({ command: '!stiker', args: 'halo dunia', ...base });
+    const bubble = await service.process({ command: '!stiker', args: 'halo dunia', modifier: 'bubble', ...base });
+    const quote = await service.process({ command: '!stiker', args: 'halo dunia', modifier: 'quote', ...base });
+    expect(plain?.mimetype).toBe('image/webp');
+    // Tiga pipeline berbeda -> tiga output berbeda.
+    expect(plain!.buffer.equals(bubble!.buffer)).toBe(false);
+    expect(plain!.buffer.equals(quote!.buffer)).toBe(false);
+    expect(bubble!.buffer.equals(quote!.buffer)).toBe(false);
+  });
+
   it('video kedua saat slot penuh -> VIDEO_BUSY', async () => {
     const { PerUserConcurrency } = await import('../../src/stickers/concurrency');
     const limited = new StickerService(new PerUserConcurrency(1));

@@ -3,6 +3,7 @@ import env from '../config/env';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { logger } from '../observability/logger';
+import { hashIdentifier } from '../observability/privacy';
 
 // Klien WAHA mengikuti docs resmi: POST /api/<action> dengan session di body JSON.
 export class WAHAClient {
@@ -32,13 +33,12 @@ export class WAHAClient {
         body: JSON.stringify({ session: this.session, chatId, ...body }),
       });
     } catch (err) {
-      logger.error(`WAHA ${action} request failed`, { chatId, error: String(err) });
+      logger.error(`WAHA ${action} request failed`, { chatIdHash: hashIdentifier(chatId), error: String(err) });
       throw new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
     }
 
     if (!response.ok) {
-      const responseBody = await response.text().catch(() => '');
-      logger.error(`WAHA ${action} failed with status ${response.status}: ${responseBody.slice(0, 200)}`, { chatId, status: response.status, responseBody: responseBody.slice(0, 300) });
+      logger.error(`WAHA ${action} failed with status ${response.status}`, { chatIdHash: hashIdentifier(chatId), status: response.status });
       throw new AppError(ErrorCode.WAHA_SEND_FAILED, 'Failed to send via WAHA');
     }
 
@@ -55,7 +55,7 @@ export class WAHAClient {
       },
       ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendSticker', chatId);
-    logger.info('Sticker sent via WAHA', { chatId });
+    logger.info('Sticker sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
   }
 
   async sendImage(chatId: string, imageBuffer: Buffer, mimetype: string, replyTo?: string): Promise<void> {
@@ -69,7 +69,7 @@ export class WAHAClient {
       },
       ...(replyTo ? { reply_to: replyTo } : {}),
     }, 'sendImage', chatId);
-    logger.info('Image sent via WAHA', { chatId });
+    logger.info('Image sent via WAHA', { chatIdHash: hashIdentifier(chatId) });
   }
 
   async sendText(chatId: string, text: string, replyTo?: string): Promise<void> {

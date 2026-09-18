@@ -77,6 +77,15 @@ describe('MessageNormalizer', () => {
     expect(msg.reply?.senderName).toBe('?');
   });
 
+  it('fromMe dari payload diteruskan (anti self-loop)', () => {
+    const mine = normalizer.normalize(basePayload({ fromMe: true, body: '!stiker x' }) as any);
+    expect(mine.fromMe).toBe(true);
+    const other = normalizer.normalize(basePayload({ fromMe: false }) as any);
+    expect(other.fromMe).toBe(false);
+    const missing = normalizer.normalize(basePayload() as any);
+    expect(missing.fromMe).toBe(false);
+  });
+
   it('shouldIgnore: abaikan non-command, terima command', () => {
     const plain = normalizer.normalize(basePayload({ body: 'halo' }) as any);
     expect(normalizer.shouldIgnore(plain)).toBe(true);

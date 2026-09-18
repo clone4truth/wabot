@@ -30,6 +30,6 @@ export const userMessages: Record<ErrorCode, string> = {
   [ErrorCode.WAHA_SEND_FAILED]: '❌ Gagal mengirim stiker ke WAHA.',
   [ErrorCode.INVALID_WEBHOOK_SIGNATURE]: '❌ Webhook tidak valid.',
   [ErrorCode.MEDIA_NOT_AVAILABLE]: '❌ Media dari pesan yang direply tidak tersedia.',
-  [ErrorCode.UNSUPPORTED_STICKER_TYPE]: '❌ Tipe sticker tidak didukung untuk konversi ini.',
+  [ErrorCode.UNSUPPORTED_STICKER_TYPE]: '❌ Tipe sticker tidak didukung. Animated → !togif, static → !toimg.',
   [ErrorCode.TEMP_FILE_CLEANUP_FAILED]: '⚠️ Gagal membersihkan file sementara.',
 };

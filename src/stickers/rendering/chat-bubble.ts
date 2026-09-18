@@ -33,7 +33,7 @@ function escapeXml(text: string): string {
 }
 
 // Bungkus kata perkiraan lebar font sans (cukup untuk SVG tanpa autowrap).
-function wrapText(text: string, maxChars: number, maxLines: number): string[] {
+export function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   const words = String(text ?? '').split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = '';
@@ -75,8 +75,8 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
 
   const nameColor = senderColor(senderId || senderName);
   const quotedColor = senderColor(quoted?.senderId || quoted?.senderName || '?');
-  const quotedLines = quoted ? wrapText(quoted.body.slice(0, 140), Math.floor(innerW / (quoteBodySize * 0.5)) - 4, 2) : [];
-  const textLines = wrapText(text, Math.floor(innerW / (textSize * 0.5)), 10);
+  const quotedLines = quoted ? wrapText(quoted.body.slice(0, 140), Math.floor(innerW / (quoteBodySize * 0.62)) - 4, 2) : [];
+  const textLines = wrapText(text, Math.floor(innerW / (textSize * 0.62)), 10);
 
   const lh = (s: number) => Math.round(s * 1.35);
   let y = pad + 8;

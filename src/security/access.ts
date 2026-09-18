@@ -2,6 +2,7 @@ import env from '../config/env';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { JsonFileStore, getSharedStore } from '../storage/json-store';
 import { logger } from '../observability/logger';
+import { hashIdentifier } from '../observability/privacy';
 
 export type DenyReason = 'chat' | 'blocked' | 'admin';
 
@@ -57,7 +58,7 @@ export class AccessGuard {
       admins = new Set(participants.filter((p) => p.role !== 'participant').map((p) => p.id));
     } catch (err) {
       // Fail-open dengan log: admin-only itu kenyamanan, bukan benteng.
-      logger.warn('Gagal cek admin grup, izinkan sementara', { groupId, error: String(err) });
+      logger.warn('Gagal cek admin grup, izinkan sementara', { chatIdHash: hashIdentifier(groupId), error: String(err) });
       return true;
     }
     this.adminCache.set(groupId, { admins, expiresAt: now + ADMIN_CACHE_TTL_MS });

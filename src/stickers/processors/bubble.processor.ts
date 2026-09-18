@@ -13,7 +13,7 @@ export class BubbleProcessor {
     quoted?: QuotedMessage,
     avatar?: { buffer: Buffer; mimetype: string } | null,
   ): Promise<StickerResult> {
-    if (text.length > env.maxTextLength) {
+    if (Array.from(text).length > env.maxTextLength) {
       throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks maksimal ${env.maxTextLength} karakter`);
     }
 

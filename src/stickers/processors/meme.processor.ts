@@ -1,6 +1,6 @@
 import Sharp from 'sharp';
 import { StickerResult } from '../result';
-import { renderTextToBuffer } from '../rendering/text-layout';
+import { renderFittedText } from '../rendering/text-layout';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
@@ -11,6 +11,7 @@ export class MemeProcessor {
     const [topText, bottomText] = memeText.split('|').map(s => s.trim());
 
     const { filePath } = await downloadMedia(imageUrl).catch((err) => {
+      if (err instanceof AppError) throw err;
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download image: ${String(err)}`);
     });
 
@@ -20,10 +21,10 @@ export class MemeProcessor {
 
       const maxTextWidth = Math.min(width || 512, 512);
       const topBuffer = topText
-        ? await renderTextToBuffer({ text: topText, maxWidth: maxTextWidth, maxHeight: 80, fontSize: 24 })
+        ? (await renderFittedText({ text: topText, maxWidth: maxTextWidth, maxHeight: 120, maxFontSize: 44, color: '#ffffff', outlineColor: '#000000', outlineWidth: 2 })).buffer
         : null;
       const bottomBuffer = bottomText
-        ? await renderTextToBuffer({ text: bottomText, maxWidth: maxTextWidth, maxHeight: 80, fontSize: 24 })
+        ? (await renderFittedText({ text: bottomText, maxWidth: maxTextWidth, maxHeight: 120, maxFontSize: 44, color: '#ffffff', outlineColor: '#000000', outlineWidth: 2 })).buffer
         : null;
 
       let sharpInstance = Sharp(imageBuffer).resize(512, 512, { fit: 'cover' });
