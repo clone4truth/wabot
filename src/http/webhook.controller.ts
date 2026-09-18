@@ -84,31 +84,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
 
     idempotency.markProcessed(idempotencyKey);
 
-    let result: any;
-    try {
-      result = await commandRouter.dispatch(parsed, {
-        ...message,
-        reply: message.reply,
-        media: message.media,
-      });
-    } catch (err: any) {
-      if (err instanceof AppError) {
-        await wahaClient.sendText(message.chatId, err.message);
-        return reply.code(200).send({ status: 'ok', error: err.code });
-      }
-      throw err;
-    }
-
-    if (result && result.buffer) {
-      await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
-    } else if (parsed.name === 'menu') {
-      await wahaClient.sendText(message.chatId, handleMenu());
-    } else if (parsed.name === 'help') {
-      await wahaClient.sendText(message.chatId, handleHelp());
-    } else if (parsed.name === 'ping') {
-      const ping = handlePing();
-      await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`);
-    }
+    const result = await dispatchCommand(parsed, message);
 
     logger.info('Webhook processed', {
       requestId: request.id,
@@ -125,5 +101,39 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     }
     logger.error('Webhook processing error', { error: String(err), requestId: request.id });
     return reply.code(500).send({ error: 'Internal server error' });
+  }
+}
+
+async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseCommand>>, message: any) {
+  switch (parsed.name) {
+    case 'menu':
+      await wahaClient.sendText(message.chatId, handleMenu());
+      break;
+    case 'help':
+      await wahaClient.sendText(message.chatId, handleHelp());
+      break;
+    case 'ping':
+      const ping = handlePing();
+      await wahaClient.sendText(message.chatId, `🏓 Pong! Latency: ${ping.latency}ms`);
+      break;
+    default:
+      let result: any;
+      try {
+        result = await commandRouter.dispatch(parsed, {
+          ...message,
+          reply: message.reply,
+          media: message.media,
+        });
+      } catch (err: any) {
+        if (err instanceof AppError) {
+          await wahaClient.sendText(message.chatId, err.message);
+          return;
+        }
+        throw err;
+      }
+
+      if (result && result.buffer) {
+        await wahaClient.sendImage(message.chatId, result.buffer, result.mimetype);
+      }
   }
 }
