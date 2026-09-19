@@ -1,0 +1,199 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  quality:
+    name: Quality gate (typecheck · build · test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install ffmpeg (test dependency)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-dejavu-core
+
+      - name: Tests
+        run: npm test
+
+  build-push:
+    name: Build & push image (GHCR)
+    runs-on: ubuntu-latest
+    needs: quality
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute image name & tag
+        id: meta
+        run: |
+          # GHCR mewajibkan nama image lowercase.
+          IMAGE="${REGISTRY}/${IMAGE_NAME,,}"
+          TAG="sha-${GITHUB_SHA::7}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: build-push
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
+
+            IMAGE="${{ needs.build-push.outputs.image }}"
+            TAG="${{ needs.build-push.outputs.tag }}"
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+
+            cd "$APP_DIR"
+
+            # Sinkronkan file compose/workflow dari repo. data/, .env, dan logs
+            # diabaikan git sehingga tidak tersentuh. Lewati bila bukan clone git.
+            if [ -d .git ]; then
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # Simpan image yang sedang berjalan sebagai target rollback SEBELUM pull.
+            CURRENT="$(docker compose ps --format '{{.Image}}' 2>/dev/null | head -1 || true)"
+            if [ -n "$CURRENT" ] && [ "$CURRENT" != "${IMAGE}:${TAG}" ]; then
+              docker tag "$CURRENT" "${IMAGE}:latest-previous" || true
+              echo "Rollback target: ${IMAGE}:latest-previous (was $CURRENT)"
+            fi
+
+            # Compose memakai image spesifik (tag sha) — lihat docker-compose.yml.
+            export WABOT_IMAGE="${IMAGE}:${TAG}"
+
+            echo "Deploying ${WABOT_IMAGE}"
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+
+            # Prune image lama dari commit sebelumnya (aman: hanya dangling).
+            docker image prune -f
+
+      - name: Health check
+        id: health
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            HEALTH_URL="${{ secrets.VPS_HEALTH_URL }}"
+            HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/health}"
+
+            # Tunggu container siap lalu verifikasi GET /health (liveness, selalu 200 bila proses hidup).
+            for i in $(seq 1 30); do
+              if curl -fsS --max-time 3 "$HEALTH_URL" > /dev/null 2>&1; then
+                echo "Health OK after attempt ${i}"
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Health check FAILED after 60s (${HEALTH_URL})"
+            exit 1
+
+      - name: Rollback on failed health check
+        if: failure() && steps.health.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            IMAGE="${{ needs.build-push.outputs.image }}"
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            HEALTH_URL="${{ secrets.VPS_HEALTH_URL }}"
+            HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/health}"
+
+            cd "$APP_DIR"
+
+            echo "Rolling back..."
+            # Jalankan ulang image terakhir yang diketahui sehat (ditandai saat deploy).
+            if docker image inspect "${IMAGE}:latest-previous" > /dev/null 2>&1; then
+              export WABOT_IMAGE="${IMAGE}:latest-previous"
+              docker compose up -d --remove-orphans
+            else
+              echo "No previous image tag found — keeping current state for manual inspection."
+              exit 1
+            fi
+
+            for i in $(seq 1 30); do
+              if curl -fsS --max-time 3 "$HEALTH_URL" > /dev/null 2>&1; then
+                echo "Rollback health OK"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Rollback health check FAILED — manual intervention required."
+            exit 1
