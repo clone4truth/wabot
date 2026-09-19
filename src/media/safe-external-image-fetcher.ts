@@ -107,7 +107,12 @@ export interface SafeRequestOptions {
   port: number;
   path: string;
   headers: Record<string, string>;
-  /** Timeout transport ms. */
+  /**
+   * Batas waktu TOTAL jaringan (ms) — satu wall-clock limit untuk seluruh siklus:
+   * connect/TLS + menunggu response headers + membaca response body.
+   * Tidak ada timeout baru setelah headers tiba; timer tetap aktif selama body
+   * streaming dan menghancurkan koneksi saat habis.
+   */
   timeoutMs: number;
   /** Batas byte body; transport harus dihancurkan bila terlampaui. */
   maxBytes: number;
@@ -133,6 +138,20 @@ export const defaultSafeFetcherDeps: SafeFetcherDependencies = {
   },
   request(options: SafeRequestOptions): Promise<SafeHttpResponse> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+
+      // TOTAL NETWORK TIMEOUT — satu timer wall-clock yang dimulai SEBELUM request
+      // dan TETAP AKTIF selama body streaming. Tidak di-clear saat headers tiba,
+      // sehingga server yang "accept TCP/TLS lalu tidak pernah merespons" maupun
+      // "kirim headers lalu stall body" sama-sama terhenti tepat pada timeoutMs.
+      // Contract: connect + headers + body ≤ timeoutMs (bukan masing-masing).
+      const timer = setTimeout(() => {
+        req.destroy(new Error('Avatar network timeout'));
+      }, Math.max(0, options.timeoutMs));
+      if (typeof (timer as any).unref === 'function') (timer as any).unref();
+
+      const clearTimer = () => clearTimeout(timer);
+
       const req = https.request(
         {
           hostname: options.family === 6 ? `[${options.ip}]` : options.ip,
@@ -144,15 +163,36 @@ export const defaultSafeFetcherDeps: SafeFetcherDependencies = {
           // TLS verification ENABLED (rejectUnauthorized tidak di-set → default true)
         },
         (res) => {
+          // Timer TIDAK di-clear di sini — body masih streaming dan harus tetap
+          // tercakup dalam total timeout yang sama.
+          res.once('end', clearTimer);      // body selesai normal
+          res.once('close', clearTimer);    // koneksi tertutup
+          res.once('aborted', clearTimer);  // response dibatalkan
+          res.once('error', clearTimer);    // error pada response stream
+
+          settled = true;
           resolve({
             statusCode: res.statusCode ?? 0,
             headers: res.headers,
             stream: res,
-            destroy: () => req.destroy(),
+            destroy: () => {
+              clearTimer();
+              req.destroy();
+            },
           });
         },
       );
-      req.on('error', reject);
+
+      // Kegagalan sebelum headers (DNS sudah di luar; connect/TLS/socket error):
+      // hentikan timer agar tidak ada handle yang bocor.
+      req.once('error', (err) => {
+        clearTimer();
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      });
+
       req.end();
     });
   },
@@ -381,6 +421,17 @@ function readLimitedBody(
     });
 
     response.stream.on('error', () => {
+      if (finished) return;
+      finish(null);
+    });
+
+    // Socket dihancurkan di tengah body (total network timeout / server abort):
+    // pastikan Promise tetap settle — jangan biarkan fetch menggantung.
+    response.stream.on('aborted', () => {
+      if (finished) return;
+      finish(null);
+    });
+    response.stream.on('close', () => {
       if (finished) return;
       finish(null);
     });
