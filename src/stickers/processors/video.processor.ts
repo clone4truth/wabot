@@ -7,6 +7,7 @@ import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
+import { createDeadline } from '../jobs/deadline';
 
 export class VideoStickerProcessor {
   async process(
@@ -15,6 +16,8 @@ export class VideoStickerProcessor {
     signal?: AbortSignal,
   ): Promise<StickerResult> {
     const startTime = Date.now();
+    // TOTAL-DEADLINE (P0): deadline absolut dari sisa budget JobManager.
+    const deadline = createDeadline(timeoutMs, signal);
     const { filePath } = await downloadMedia(videoUrl, { timeoutMs, signal }).catch((err) => {
       if (err instanceof AppError) throw err;
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download video: ${String(err)}`);
@@ -22,11 +25,16 @@ export class VideoStickerProcessor {
 
     const outputPath = createTempFile('.webp');
     try {
-      const elapsed = Date.now() - startTime;
-      const remainingProbe = Math.max(1000, timeoutMs - elapsed);
+      // STRICT remaining budget: TIDAK ADA Math.max yang memperpanjang deadline.
+      let remainingProbe = timeoutMs - (Date.now() - startTime);
+      if (remainingProbe <= 0) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+      remainingProbe = Math.min(5000, remainingProbe);
+
       let metadata;
       try {
-        metadata = await getVideoMetadata(filePath, Math.min(5000, remainingProbe));
+        metadata = await getVideoMetadata(filePath, remainingProbe, deadline.signal);
       } catch (err) {
         if (err instanceof AppError) throw err;
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, `Video tidak dapat dibaca: ${String(err)}`);
@@ -40,12 +48,10 @@ export class VideoStickerProcessor {
         throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Video terlalu besar');
       }
 
-      if (signal?.aborted) {
-        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
-      }
+      // Jangan terima input/output yang diproses setelah deadline.
+      deadline.throwIfExpired();
 
-      const elapsedBeforeFfmpeg = Date.now() - startTime;
-      const remainingFfmpeg = timeoutMs - elapsedBeforeFfmpeg;
+      const remainingFfmpeg = timeoutMs - (Date.now() - startTime);
       if (remainingFfmpeg <= 0) {
         throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
       }
@@ -57,9 +63,15 @@ export class VideoStickerProcessor {
         env.maxVideoDurationSeconds,
         15,
         remainingFfmpeg,
+        deadline.signal,
       );
+
+      // Jangan menerima output yang dihasilkan setelah deadline.
+      deadline.throwIfExpired();
+
       return await this.validateOutput(outputPath);
     } finally {
+      deadline.cleanup();
       cleanupTempFile(filePath);
       cleanupTempFile(outputPath);
     }

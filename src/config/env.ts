@@ -39,7 +39,6 @@ export interface EnvConfig {
   backgroundRemovalApiUrl: string;
   backgroundRemovalApiKey: string;
   backgroundRemovalTimeoutMs: number;
-  backgroundRemovalConcurrency: number;
   backgroundRemovalMaxResponseBytes: number;
   /** Batas piksel untuk Sharp saat validasi respons BG API (cegah pixel bomb). */
   backgroundRemovalMaxPixels: number;
@@ -93,7 +92,6 @@ const env: EnvConfig = {
   backgroundRemovalApiUrl: process.env.BACKGROUND_REMOVAL_API_URL || '',
   backgroundRemovalApiKey: process.env.BACKGROUND_REMOVAL_API_KEY || '',
   backgroundRemovalTimeoutMs: Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS) || 30000,
-  backgroundRemovalConcurrency: Number(process.env.BACKGROUND_REMOVAL_CONCURRENCY) || 1,
   backgroundRemovalMaxResponseBytes: Number(process.env.BACKGROUND_REMOVAL_MAX_RESPONSE_BYTES) || 20971520,
   backgroundRemovalMaxPixels: Number(process.env.BACKGROUND_REMOVAL_MAX_PIXELS) || 25_000_000,
   avatarMaxBytes: Number(process.env.AVATAR_MAX_BYTES) || 2 * 1024 * 1024,

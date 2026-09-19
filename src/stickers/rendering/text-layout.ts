@@ -258,3 +258,144 @@ export function fitTextIntoRegion(options: FitTextRegionOptions): FittedRegionRe
   );
 }
 
+// ---------------------------------------------------------------------------
+// Stage 2 fit: ukur BOUNDS RENDER AKTUAL (piksel), bukan estimasi lebar karakter.
+// ---------------------------------------------------------------------------
+
+export interface FitTextRegionRenderedOptions {
+  text: string;
+  /** Lebar safe area piksel yang tidak boleh dilewati teks ter-render. */
+  width: number;
+  /** Tinggi safe area piksel yang tidak boleh dilewati teks ter-render. */
+  height: number;
+  maxFontSize?: number;
+  minFontSize?: number;
+  lineHeightFactor?: number;
+  fontWeight?: string;
+  color?: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+  /** Font family SVG; default family font aplikasi. */
+  fontFamily?: string;
+  /** Kanvas SVG width/height yang dipakai saat render pengukuran. Default: width/height. */
+  svgWidth?: number;
+  svgHeight?: number;
+  /** Pad vertikal antar-line dinyatakan sebagai multiplier fontSize. */
+  /** Callback render kustom per baris kandidat (mis. untuk prefix terminal). Return string SVG text-layer. */
+  renderLine?: (lines: string[], fontSize: number, lineHeight: number) => string;
+  /** Batas percobaan font (default turun 2px per langkah). */
+  step?: number;
+}
+
+export interface FittedRegionRenderedResult {
+  lines: string[];
+  fontSize: number;
+  lineHeight: number;
+  totalHeight: number;
+  renderedWidth: number;
+  renderedHeight: number;
+}
+
+/**
+ * Render SATU baris/kumpulan baris ke SVG transparan, lalu ukur bounds piksel aktual
+ * via trim(). Hanya teks-layer yang dirender — tanpa background — sehingga trim box
+ * mencerminkan tepi glyph+outline sebenarnya.
+ */
+async function measureRenderedTextLayer(svg: string): Promise<{ width: number; height: number }> {
+  const { info } = await Sharp(Buffer.from(svg))
+    .trim({ threshold: 10 })
+    .toBuffer({ resolveWithObject: true });
+  return { width: info.width ?? 0, height: info.height ?? 0 };
+}
+
+/**
+ * fitTextIntoRegion Stage-2: validasi bounds piksel hasil render aktual.
+ *
+ * Stage 1 (logical wrap) tetap dipakai untuk menghasilkan kandidat baris;
+ * Stage 2 merender kandidat ke SVG transparan dan menolaknya bila trim box
+ * melebihi safe area. Loop menurunkan font hingga muat; bila minFontSize gagal
+ * → TEXT_TOO_LONG (TIDAK PERNAH clip/truncate).
+ */
+export async function fitTextIntoRegionRendered(
+  options: FitTextRegionRenderedOptions,
+): Promise<FittedRegionRenderedResult> {
+  const {
+    text,
+    width,
+    height,
+    maxFontSize = 36,
+    minFontSize = 14,
+    lineHeightFactor = 1.25,
+    fontWeight = 'bold',
+    color = '#ffffff',
+    outlineColor = '#000000',
+    outlineWidth = 0,
+    fontFamily,
+    svgWidth,
+    svgHeight,
+    renderLine,
+    step = 2,
+  } = options;
+
+  const family = fontFamily ?? getFontFamily(getDefaultFontPath());
+  const canvasW = svgWidth ?? width;
+  const canvasH = svgHeight ?? height;
+
+  const stroke = outlineWidth > 0 && outlineColor !== 'transparent'
+    ? ` stroke="${outlineColor}" stroke-width="${Math.round(outlineWidth * 2)}" paint-order="stroke"`
+    : '';
+
+  let lastMeasure: { width: number; height: number } | null = null;
+
+  for (let size = maxFontSize; size >= minFontSize; size -= step) {
+    // Stage 1: logical wrap (grapheme-aware) untuk kandidat baris.
+    const charsPerLine = Math.max(4, Math.floor(width / (size * 0.62)));
+    const lines = wrapWords(text, charsPerLine);
+    const lineHeight = Math.round(size * lineHeightFactor);
+    const totalHeight = lines.length * lineHeight;
+
+    if (totalHeight > height) {
+      continue; // logical overflow — langsung ke font lebih kecil
+    }
+
+    // Stage 2: render actual text layer dan ukur bounds piksel.
+    const startY = Math.round(size * 0.85);
+    const textElements = renderLine
+      ? renderLine(lines, size, lineHeight)
+      : lines
+          .map((line, idx) => {
+            const y = startY + idx * lineHeight + Math.round(size * 0.85);
+            return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${size}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
+          })
+          .join('');
+
+    const measureSvg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}" viewBox="0 0 ${canvasW} ${canvasH}">` +
+      textElements +
+      `</svg>`;
+
+    try {
+      const measured = await measureRenderedTextLayer(measureSvg);
+      lastMeasure = measured;
+      if (measured.width <= width && measured.height <= height) {
+        return {
+          lines,
+          fontSize: size,
+          lineHeight,
+          totalHeight,
+          renderedWidth: measured.width,
+          renderedHeight: measured.height,
+        };
+      }
+    } catch {
+      // Render/trim gagal (mis. teks kosong setelah escape) — lanjut ke font lebih kecil.
+      continue;
+    }
+  }
+
+  throw new AppError(
+    ErrorCode.TEXT_TOO_LONG,
+    `Teks tidak muat setelah diukur render aktual (safe ${width}x${height}, terakhir ${lastMeasure ? `${lastMeasure.width}x${lastMeasure.height}` : 'n/a'})`,
+  );
+}
+

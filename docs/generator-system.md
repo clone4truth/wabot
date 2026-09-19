@@ -25,6 +25,10 @@ export interface GeneratorInput {
   mimetype?: string;
   options?: Record<string, unknown>;
   content?: Record<string, unknown>;
+  /** Sisa budget pemrosesan (ms) yang dipropagasi JobManager. */
+  timeoutMs?: number;
+  /** Sinyal pembatalan yang dipropagasi JobManager / pemanggil eksternal. */
+  signal?: AbortSignal;
 }
 
 export interface StickerGenerator {
@@ -85,6 +89,9 @@ Mengontrol alokasi sumber daya prosesor dan memori secara strictly bounded tanpa
 - **Concurrency Limits**: `MAX_IMAGE_JOBS` (4), `MAX_VIDEO_JOBS` (2), `MAX_ANIMATION_JOBS` (2), `MAX_BACKGROUND_JOBS` (1).
 - **Bounded Queues**: `MAX_IMAGE_QUEUE` (50), `MAX_VIDEO_QUEUE` (20), `MAX_ANIMATION_QUEUE` (20), `MAX_BACKGROUND_QUEUE` (10). Overflow langsung ditolak (`JOB_QUEUE_FULL`).
 - **Queue Wait Timeout & Cancellation**: Waktu tunggu antrean diperhitungkan dalam deadline total; job yang dibatalkan saat masih `QUEUED` tidak akan pernah dieksekusi.
+- **Total Deadline & Late-Success Rejection**: Deadline tunggal mencakup seluruh siklus job. Task yang tetap berjalan setelah deadline (mis. render yang tidak bisa dihentikan seketika) lalu resolve "sukses" **tetap ditolak** — job berstatus `FAILED` + `errorCode = PROCESSING_TIMEOUT`, bukan `DONE`. Slot konkurensi baru dilepas setelah task underlying benar-benar settle, sehingga tidak ada dua job berat berjalan bersamaan.
+- **Status Timeout**: timeout saat `QUEUED` → `CANCELLED`; timeout saat `PROCESSING` (termasuk late success) → `FAILED` + `PROCESSING_TIMEOUT`.
+- **Propagasi Sisa Budget**: Generator menerima `remainingTimeoutMs` + `signal`; processor (ATTP/ToGif/Video) membuat `DeadlineContext` dan meneruskan **sisa waktu aktual** ke `ffmpeg`/`ffprobe` — bukan budget penuh dari awal proses. Video processor tidak pernah memperpanjang deadline (tanpa `Math.max`).
 - **Privasi & Isolasi**: Metadata job hanya menyimpan `ownerHash = hashIdentifier(senderId)` sehingga nomor atau identitas pribadi pengirim tidak pernah tersimpan di memori.
 - **History Pruning**: Menyimpan maksimal 200 job yang sudah selesai dengan kebijakan eviksi oldest-first dan TTL pruning (`JOB_HISTORY_TTL_SECONDS`).
 

@@ -8,6 +8,7 @@ import { getVideoMetadata, runFfmpegWithTimeout } from '../../media/ffmpeg';
 import env from '../../config/env';
 import fs from 'fs';
 import path from 'path';
+import { createDeadline } from '../jobs/deadline';
 
 export class ToGifProcessor {
   async process(
@@ -15,6 +16,9 @@ export class ToGifProcessor {
     timeoutMs: number = env.videoProcessingTimeoutMs,
     signal?: AbortSignal,
   ): Promise<VideoResult> {
+    // TOTAL-DEADLINE (P0): satu deadline absolut dari sisa budget JobManager.
+    const deadline = createDeadline(timeoutMs, signal);
+
     let meta;
     try {
       meta = await Sharp(stickerBuffer).metadata();
@@ -93,9 +97,7 @@ export class ToGifProcessor {
     try {
       const concatLines: string[] = [];
       for (let i = 0; i < framePlans.length; i++) {
-        if (signal?.aborted) {
-          throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
-        }
+        deadline.throwIfExpired();
         const plan = framePlans[i];
         const frameFileName = `${i}.png`;
         const framePath = path.join(workdir, frameFileName);
@@ -115,6 +117,13 @@ export class ToGifProcessor {
       const concatFilePath = path.join(workdir, 'frames.txt');
       await fs.promises.writeFile(concatFilePath, concatLines.join('\n'));
 
+      // FFmpeg hanya mendapat SISA waktu deadline (bukan budget penuh).
+      const remainingFfmpeg = deadline.remainingMs();
+      if (remainingFfmpeg === undefined || remainingFfmpeg <= 0) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+      deadline.throwIfExpired();
+
       await runFfmpegWithTimeout([
         '-y',
         '-loglevel', 'error',
@@ -127,9 +136,17 @@ export class ToGifProcessor {
         '-movflags', '+faststart',
         '-an',
         outputPath,
-      ], timeoutMs);
+      ], remainingFfmpeg, deadline.signal);
 
-      const outMeta = await getVideoMetadata(outputPath);
+      deadline.throwIfExpired();
+
+      // ffprobe juga hanya mendapat SISA waktu deadline.
+      const remainingProbe = deadline.remainingMs();
+      if (remainingProbe === undefined || remainingProbe <= 0) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+
+      const outMeta = await getVideoMetadata(outputPath, remainingProbe, deadline.signal);
       if (
         !outMeta.format.toLowerCase().includes('mp4') ||
         outMeta.codec !== 'h264' ||
@@ -140,6 +157,7 @@ export class ToGifProcessor {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Output MP4 tidak valid');
       }
 
+      deadline.throwIfExpired();
       const mp4Buffer = await fs.promises.readFile(outputPath).catch(() => {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Konversi GIF gagal');
       });
@@ -156,6 +174,7 @@ export class ToGifProcessor {
         size: mp4Buffer.length,
       };
     } finally {
+      deadline.cleanup();
       try {
         fs.rmSync(workdir, { recursive: true, force: true });
       } catch {

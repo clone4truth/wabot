@@ -14,6 +14,7 @@ import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
 
 import { defaultAnimationRegistry } from '../animations/registry';
 import { AnimationLayout } from '../animations/types';
+import { createDeadline } from '../jobs/deadline';
 
 export interface AttpProcessOptions {
   effect?: string;
@@ -45,11 +46,17 @@ export class AttpProcessor {
       }
     }
 
+    // TOTAL-DEADLINE (P0): satu deadline absolut untuk seluruh proses.
+    // timeoutMs di sini adalah SISA budget dari JobManager, bukan budget baru.
+    const deadline = createDeadline(timeoutMs, signal);
+    signal = deadline.signal;
+
     const clean = validateText(text, { emptyMessage: 'Teks !attp tidak boleh kosong' });
     const preset = defaultAnimationRegistry.get(effectName);
 
     // Hitung layout adaptif SATU KALI agar semua frame identik (tidak ada jitter/jumping).
-    const layout = await this.calculateStableLayout(clean);
+    deadline.throwIfExpired();
+    const layout = await this.calculateStableLayout(clean, deadline);
 
     const workdir = path.join(env.tempDir, `attp-${randomUUID()}`);
     fs.mkdirSync(workdir, { recursive: true });
@@ -61,9 +68,7 @@ export class AttpProcessor {
       const fps = preset.fps;
 
       for (let i = 0; i < frameCount; i++) {
-        if (signal?.aborted) {
-          throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
-        }
+        deadline.throwIfExpired();
         const svg = preset.renderSvg(i, {
           text: clean,
           layout,
@@ -71,6 +76,13 @@ export class AttpProcessor {
         });
         await Sharp(Buffer.from(svg)).png().toFile(path.join(workdir, `${i}.png`));
       }
+
+      // FFmpeg hanya mendapat SISA waktu (bukan budget penuh dari awal proses).
+      const remainingFfmpeg = deadline.remainingMs();
+      if (remainingFfmpeg === undefined || remainingFfmpeg <= 0) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Processing timeout');
+      }
+      deadline.throwIfExpired();
 
       await runFfmpegWithTimeout([
         '-y', '-loglevel', 'error',
@@ -82,9 +94,12 @@ export class AttpProcessor {
         '-loop', '0',
         '-an',
         outputPath,
-      ], timeoutMs);
+      ], remainingFfmpeg, signal);
 
+      deadline.throwIfExpired();
       const buffer = await fs.promises.readFile(outputPath);
+
+      deadline.throwIfExpired();
       const metadata = await Sharp(buffer).metadata();
 
       if (
@@ -108,6 +123,7 @@ export class AttpProcessor {
         size: buffer.length,
       };
     } finally {
+      deadline.cleanup();
       try {
         fs.rmSync(workdir, { recursive: true, force: true });
       } catch {
@@ -117,11 +133,12 @@ export class AttpProcessor {
     }
   }
 
-  private async calculateStableLayout(text: string): Promise<AnimationLayout> {
+  private async calculateStableLayout(text: string, deadline?: ReturnType<typeof createDeadline>): Promise<AnimationLayout> {
     const maxWidth = 440;
     const maxHeight = 400;
 
     for (let fontSize = 56; fontSize >= 18; fontSize -= 4) {
+      if (deadline) deadline.throwIfExpired();
       const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.62)));
       const lines = wrapWords(text, maxChars);
       const lh = Math.round(fontSize * 1.25);

@@ -22,6 +22,7 @@ Bot WhatsApp modular untuk pembuatan dan konversi stiker tingkat lanjut mengguna
   - `!toimg` — Konversi stiker statis ke gambar PNG.
   - `!togif` — Konversi stiker bergerak ke video MP4 H.264.
 - **Keamanan & Privasi**: HMAC webhook, exact-origin SSRF protection, bounded temp cleanup, rate limiting, and zero sensitive chat logging.
+- **Safe Avatar Fetching**: Foto profil diambil via endpoint WAHA terdokumentasi (`GET /api/{session}/chats/{chatId}/picture`, field respons `url`) lalu diunduh dengan `SafeExternalImageFetcher`: HTTPS-only, validasi DNS publik + IP pinning, TLS SNI hostname asli, redirect re-validasi, byte/pixel cap, MIME + format raster tervalidasi Sharp — tanpa penerusan kredensial.
 
 Untuk dokumentasi lengkap perintah dan arsitektur, lihat:
 - [Panduan Command](docs/commands.md)
@@ -77,7 +78,7 @@ git push -u origin main
 
 ## Requirements
 
-- Node.js >= 20
+- Node.js 22+
 - FFmpeg (dengan encoder libx264 dan libwebp)
 - fontconfig + ttf-dejavu + font-noto + font-noto-emoji
 - WAHA server

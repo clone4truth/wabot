@@ -8,7 +8,7 @@ import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
 import { escapeXml, validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegion, FittedRegionResult } from '../rendering/text-layout';
+import { fitTextIntoRegion, fitTextIntoRegionRendered, FittedRegionResult, FittedRegionRenderedResult } from '../rendering/text-layout';
 
 export class CaptionGenerator implements StickerGenerator {
   readonly name = 'caption';
@@ -25,7 +25,8 @@ export class CaptionGenerator implements StickerGenerator {
     const text = (input.text ?? input.content?.text ?? '') as string;
     const clean = validateText(text, { emptyMessage: 'Teks caption tidak boleh kosong' });
 
-    // Validate that text fits within maximum banner capacity
+    // Pre-check sinkron (logical) di validate; validasi bounds render aktual
+    // dijalankan di process() via fitTextIntoRegionRendered (Stage 2).
     fitTextIntoRegion({
       text: clean,
       width: 480,
@@ -52,7 +53,9 @@ export class CaptionGenerator implements StickerGenerator {
     ).toLowerCase();
 
     const maxRegionH = position === 'overlay' ? 140 : 150;
-    const fitted = fitTextIntoRegion({
+    // Stage 1+2: logical wrap LALU ukur bounds piksel render aktual — menjamin
+    // teks penuh ter-render tanpa clipping (CJK/emoji/wide glyphs termasuk).
+    const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 480,
       height: maxRegionH,

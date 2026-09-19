@@ -59,7 +59,19 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 ### Layer 3: Security & Job Management
 - **MemoryRateLimiter**: In-memory rate limiting per user (8/mnt) + per group (30/mnt)
 - **IdempotencyGuard**: In-memory TTL cache dengan atomic `tryStart(key)` (state PROCESSING/DONE)
-- **JobManager**: In-process bounded queue manager dengan kuota konkurensi global terisolasi (`MAX_IMAGE_JOBS`, `MAX_VIDEO_JOBS`, `MAX_ANIMATION_JOBS`, `MAX_BACKGROUND_JOBS`) serta isolasi state per pengguna.
+- **JobManager**: In-process bounded queue manager dengan kuota konkurensi global terisolasi (`MAX_IMAGE_JOBS`, `MAX_VIDEO_JOBS`, `MAX_ANIMATION_JOBS`, `MAX_BACKGROUND_JOBS`) serta isolasi state per pengguna. **JobManager adalah pemilik SATU-SATUNYA kendali konkurensi background job** — BackgroundRemovalService tidak memiliki konkurensi terpisah.
+- **Total Deadline (end-to-end)**:
+  ```
+  Request accepted
+  → JobManager deadline mulai (total budget)
+  → Queue wait mengonsumsi deadline
+  → Generator menerima sisa budget (remainingTimeoutMs + signal)
+  → Child process (ffmpeg/ffprobe) menerima sisa budget — bukan budget baru
+  → Late success ditolak: task yang resolve setelah deadline tetap
+    FAILED (PROCESSING_TIMEOUT), bukan DONE
+  ```
+  Konvensi status: timeout saat masih `QUEUED` → `CANCELLED`; timeout saat `PROCESSING` → `FAILED` + `errorCode = PROCESSING_TIMEOUT`.
+- **Child Process Cancellation**: Runner `runChildProcess` menerima `AbortSignal`; saat abort/timeout child di-SIGKILL dan Promise hanya settle setelah exit terkonfirmasi (invariant slot accounting).
 - **SSRF Protection**: Exact WAHA origin allowlist + validasi redirect pada MediaDownloader
 
 ### Layer 4: Generator Platform & Registries
@@ -69,7 +81,7 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **TemplateRegistry**: Template card engine berbasis SVG (`terminal`, `breaking`, `wanted`, `minimal`).
 - **TextStyleRegistry**: Preset gaya visual teks adaptif untuk TTP (`gradient`, `minimal`, `dark`, `terminal`, `gold`, `neon`).
 - **AnimationRegistry**: Preset animasi berbingkai SVG untuk ATTP (`rainbow`, `fade`, `zoom`, `blink`, `slide`, `bounce`).
-- **BackgroundRemovalService**: Abstraksi provider background removal swappable (`disabled`, `local`, `api`) dengan kendali konkurensi mandiri (`BACKGROUND_REMOVAL_CONCURRENCY`).
+- **BackgroundRemovalService**: Abstraksi provider background removal swappable (`disabled`, `local`, `api`). Konkurensi dikendalikan penuh oleh JobManager via `MAX_BACKGROUND_JOBS` (tidak ada variabel konkurensi terpisah).
 
 ### Layer 5: Creative Tools
 - **EmojiGenerator**: Render emoji besar 1-4 grapheme dengan fallback font aman tanpa tofu/clipping.
@@ -82,4 +94,5 @@ WhatsApp → WAHA → Webhook → WebhookVerifier → MessageNormalizer
 - **Validator**: MIME signature, file size, content validation
 - **FFmpeg**: Video metadata, standardized runner dengan timeout dan graceful SIGKILL
 - **TempFiles**: Create, cleanup, orphan cleanup
-- **TextLayout & TextUtils**: Grapheme cluster handling via `Intl.Segmenter` dan adaptive font fitting.
+- **TextLayout & TextUtils**: Grapheme cluster handling via `Intl.Segmenter` dan adaptive font fitting dua tahap — Stage 1 logical wrap, Stage 2 **validasi bounds piksel render aktual** (trim box via Sharp) sehingga CJK/emoji/wide-glyph tidak pernah terpotong. Template `terminal` mengikutsertakan prefix prompt (`user@wabot:~$ `, `> `) dalam pengukuran.
+- **SafeExternalImageFetcher**: Fetcher avatar SSRF-hardened dengan dependency injection (lookup/request) untuk test deterministik: HTTPS-only, tolak credentials, port 443 saja, DNS policy *resolve-all → discard non-public → wajib ≥1 publik → pin satu IP publik tervalidasi*, TLS SNI = hostname asli, Host header = hostname asli, TLS verification aktif, redirect ≤3 dengan re-validasi penuh, byte cap, MIME allowlist (jpeg/png/webp), validasi format aktual via Sharp, pixel limit, tanpa penerusan kredensial (X-Api-Key/Authorization/Cookie).

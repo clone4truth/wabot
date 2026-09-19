@@ -3,7 +3,14 @@ import { StickerTemplate } from './types';
 import { StickerResult } from '../result';
 import { escapeXml, validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegion } from '../rendering/text-layout';
+import { fitTextIntoRegionRendered, FittedRegionRenderedResult } from '../rendering/text-layout';
+
+/**
+ * INVARIANT SEMUA TEMPLATE:
+ *   FULL INPUT → dirender UTUH (tanpa clip/truncate/hide-overflow), atau
+ *   TEXT_TOO_LONG → ditolak dengan error terkontrol.
+ * Layout tervalidasi terhadap BOUNDS PIKSEL RENDER AKTUAL (bukan estimasi lebar karakter).
+ */
 
 export class TerminalTemplate implements StickerTemplate {
   readonly name = 'terminal';
@@ -14,12 +21,28 @@ export class TerminalTemplate implements StickerTemplate {
     const clean = validateText(input.text ?? '', { emptyMessage: 'Teks template terminal tidak boleh kosong' });
     const family = getFontFamily(getDefaultFontPath());
 
-    const fitted = fitTextIntoRegion({
+    // PENTING (P1): prefix prompt `user@wabot:~$ ` (baris pertama) dan `> `
+    // (baris lanjutan) HARUS ikut diukur. Strategy: render kandidat baris DENGAN
+    // prefix aktual lalu ukur seluruh text-layer (bukan sekadar reserve width).
+    const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 432,
       height: 340,
       maxFontSize: 22,
       minFontSize: 12,
+      fontFamily: 'monospace',
+      renderLine: (lines, fontSize, lineHeight) => {
+        const startY = Math.round(fontSize * 0.85);
+        return lines
+          .map((line, idx) => {
+            const y = startY + idx * lineHeight + Math.round(fontSize * 0.85);
+            const prefix = idx === 0
+              ? '<tspan fill="#48bb78">user@wabot:~$ </tspan>'
+              : '<tspan fill="#718096">&gt; </tspan>';
+            return `<text x="40" y="${y}" font-family="monospace,${family}" font-size="${fontSize}" font-weight="bold" fill="#f7fafc">${prefix}${escapeXml(line)}</text>`;
+          })
+          .join('');
+      },
     });
 
     const { lines, fontSize, lineHeight } = fitted;
@@ -67,12 +90,16 @@ export class BreakingTemplate implements StickerTemplate {
     const clean = validateText(input.text ?? '', { emptyMessage: 'Teks template breaking tidak boleh kosong' });
     const family = getFontFamily(getDefaultFontPath());
 
-    const fitted = fitTextIntoRegion({
+    // Rendered pixel bounds (P1): ukur text-layer aktual sebelum commit layout final.
+    const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 452,
       height: 300,
       maxFontSize: 34,
       minFontSize: 14,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 1,
     });
 
     const { lines, fontSize, lineHeight, totalHeight } = fitted;
@@ -119,12 +146,15 @@ export class WantedTemplate implements StickerTemplate {
     const clean = validateText(input.text ?? '', { emptyMessage: 'Teks template wanted tidak boleh kosong' });
     const family = getFontFamily(getDefaultFontPath());
 
-    const fitted = fitTextIntoRegion({
+    // Rendered pixel bounds (P1)
+    const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 432,
       height: 220,
       maxFontSize: 34,
       minFontSize: 14,
+      color: '#3b2f2f',
+      outlineColor: 'transparent',
     });
 
     const { lines, fontSize, lineHeight, totalHeight } = fitted;
@@ -172,12 +202,16 @@ export class MinimalTemplate implements StickerTemplate {
     const clean = validateText(input.text ?? '', { emptyMessage: 'Teks template minimal tidak boleh kosong' });
     const family = getFontFamily(getDefaultFontPath());
 
-    const fitted = fitTextIntoRegion({
+    // Rendered pixel bounds (P1)
+    const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 432,
       height: 240,
       maxFontSize: 34,
       minFontSize: 14,
+      color: '#f8fafc',
+      outlineColor: 'transparent',
+      fontWeight: '500',
     });
 
     const { lines, fontSize, lineHeight, totalHeight } = fitted;

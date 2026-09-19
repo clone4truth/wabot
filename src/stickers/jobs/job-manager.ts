@@ -7,6 +7,12 @@ import { createDeadline } from './deadline';
 export type JobType = 'image' | 'video' | 'animation' | 'background';
 export type JobStatus = 'QUEUED' | 'PROCESSING' | 'DONE' | 'FAILED' | 'CANCELLED';
 
+// Konvensi status timeout (disediakan konsisten):
+// - Timeout saat masih QUEUED (queue wait)  → CANCELLED  (job tidak pernah dieksekusi).
+// - Timeout saat PROCESSING (deadline habis) → FAILED + errorCode = PROCESSING_TIMEOUT.
+//   Termasuk "late success": task resolve setelah deadline → tetap ditolak sebagai
+//   PROCESSING_TIMEOUT, bukan DONE.
+
 export interface JobMetadata {
   jobId: string;
   type: JobType;
@@ -222,6 +228,11 @@ export class JobManager {
 
       next.task({ remainingTimeoutMs: deadline.remainingMs(), signal: deadline.signal })
         .then((result) => {
+          // TOTAL-DEADLINE SEMANTICS (P0):
+          // Jika deadline sudah lewat saat task akhirnya resolve, hasil "sukses terlambat"
+          // TIDAK boleh diterima. Job harus FAILED (PROCESSING_TIMEOUT), bukan DONE.
+          deadline.throwIfExpired();
+
           job.status = 'DONE';
           job.finishedAt = new Date();
           next.resolve(result);
@@ -233,10 +244,10 @@ export class JobManager {
           next.reject(err);
         })
         .finally(() => {
-          // Slot HANYA dilepas setelah task Promise benar-benar settle.
-          // Ini memastikan concurrency accounting yang benar:
-          // meski deadline sudah lewat, activeCount tidak berkurang
-          // hingga underlying work selesai.
+          // Slot HANYA dilepas setelah task Promise benar-benar settle (P0):
+          // deadline expire → signal abort → underlying task diberi waktu singkat untuk
+          // settle → hasil terlambat ditolak → BARU slot dilepas. Tidak ada early release
+          // yang menyebabkan dua job berat berjalan bersamaan.
           deadline.cleanup();
           this.activeCount[type]--;
           this.pump(type);

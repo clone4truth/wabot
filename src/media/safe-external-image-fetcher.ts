@@ -6,21 +6,27 @@
  *  - HTTPS only (tolak http:, ftp:, data:, dll).
  *  - Tolak URL dengan credentials (user:pass@host).
  *  - Port policy: hanya 443 atau kosong.
- *  - Resolve hostname → IP menggunakan dns.promises.lookup (all: true).
- *  - Tolak SEMUA IP private / loopback / link-local / multicast / reserved.
+ *  - Resolve hostname → IP (dns all:true), lalu terapkan DNS POLICY terdokumentasi:
+ *        resolve semua alamat → buang non-publik → WAJIB ada ≥1 publik →
+ *        pin SATU alamat publik tervalidasi untuk koneksi (DNS pinning).
  *  - DNS pinning via node:https dengan servername = original hostname (TLS SNI benar).
  *  - TLS verification ENABLED (tidak pernah rejectUnauthorized: false).
- *  - Redirect support: maks 3, setiap redirect re-validasi DNS+IP+HTTPS.
- *  - Batas body: AVATAR_MAX_BYTES.
+ *  - Redirect support: maks 3, setiap redirect re-validasi DNS+IP+HTTPS dari nol.
+ *  - Batas body: AVATAR_MAX_BYTES (transport dihancurkan saat overflow).
  *  - MIME allowlist: image/jpeg, image/png, image/webp.
  *  - Sharp format validation + pixel limit.
  *  - Normalisasi ke ≤256×256 setelah validasi.
  *  - Credential isolation: tidak meneruskan X-Api-Key, Authorization, Cookie.
- *  - Selalu return null (tidak throw) agar Bubble tetap render tanpa avatar.
+ *  - Selalu return null (tidak throw) agar pemanggil tetap render tanpa avatar.
+ *
+ * Dependency injection (untuk test deterministik — bukan bagian API user-facing):
+ *  - deps.lookup   : default node:dns promises lookup
+ *  - deps.request  : default node:https request
  */
 
 import dns from 'node:dns';
 import https from 'node:https';
+import type { IncomingMessage } from 'node:http';
 import Sharp from 'sharp';
 import env from '../config/env';
 
@@ -54,7 +60,7 @@ function ipv4ToInt(ip: string): number {
   return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
 }
 
-function isPrivateIPv4(ip: string): boolean {
+export function isPrivateIPv4(ip: string): boolean {
   try {
     const n = ipv4ToInt(ip);
     return PRIVATE_RANGES_V4.some(([network, mask]) => (n & mask) >>> 0 === network >>> 0);
@@ -63,7 +69,7 @@ function isPrivateIPv4(ip: string): boolean {
   }
 }
 
-function isPrivateIPv6(ip: string): boolean {
+export function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
   if (lower === '::1') return true; // loopback
   if (lower === '::') return true; // unspecified
@@ -79,7 +85,7 @@ function isPrivateIPv6(ip: string): boolean {
   return false;
 }
 
-function isPrivateIP(ip: string, family: 4 | 6): boolean {
+export function isPrivateIP(ip: string, family: 4 | 6): boolean {
   return family === 6 ? isPrivateIPv6(ip) : isPrivateIPv4(ip);
 }
 
@@ -87,6 +93,70 @@ function isPrivateIP(ip: string, family: 4 | 6): boolean {
 const ALLOWED_AVATAR_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 // Allowed Sharp format untuk avatar
 const ALLOWED_AVATAR_FORMATS = new Set(['jpeg', 'png', 'webp']);
+
+// ---------------------------------------------------------------------------
+// Injectable dependencies (produksi: node:dns + node:https; test: fake)
+// ---------------------------------------------------------------------------
+
+export interface SafeRequestOptions {
+  /** IP publik tervalidasi — target TCP koneksi (DNS pinning). */
+  ip: string;
+  family: 4 | 6;
+  /** Hostname ORIGINAL — dipakai sebagai TLS SNI (servername) & Host header. */
+  hostname: string;
+  port: number;
+  path: string;
+  headers: Record<string, string>;
+  /** Timeout transport ms. */
+  timeoutMs: number;
+  /** Batas byte body; transport harus dihancurkan bila terlampaui. */
+  maxBytes: number;
+}
+
+export interface SafeHttpResponse {
+  statusCode: number;
+  headers: IncomingMessage['headers'];
+  /** Stream body — dipakai via event 'data'/'end'/'error'. */
+  stream: IncomingMessage;
+  /** Hancurkan koneksi (abort transport). */
+  destroy: () => void;
+}
+
+export interface SafeFetcherDependencies {
+  lookup(hostname: string): Promise<dns.LookupAddress[]>;
+  request(options: SafeRequestOptions): Promise<SafeHttpResponse>;
+}
+
+export const defaultSafeFetcherDeps: SafeFetcherDependencies = {
+  async lookup(hostname: string): Promise<dns.LookupAddress[]> {
+    return dns.promises.lookup(hostname, { all: true, verbatim: true });
+  },
+  request(options: SafeRequestOptions): Promise<SafeHttpResponse> {
+    return new Promise((resolve, reject) => {
+      const req = https.request(
+        {
+          hostname: options.family === 6 ? `[${options.ip}]` : options.ip,
+          servername: options.hostname, // TLS SNI = original hostname
+          port: options.port,
+          path: options.path,
+          method: 'GET',
+          headers: options.headers,
+          // TLS verification ENABLED (rejectUnauthorized tidak di-set → default true)
+        },
+        (res) => {
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers,
+            stream: res,
+            destroy: () => req.destroy(),
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -101,6 +171,8 @@ export interface SafeFetchOptions {
   timeoutMs?: number;
   maxBytes?: number;
   maxPixels?: number;
+  /** Internal: dependency injection untuk test deterministik. Bukan API user-facing. */
+  deps?: SafeFetcherDependencies;
 }
 
 /**
@@ -111,7 +183,7 @@ export async function fetchExternalImageSafe(
   rawUrl: string,
   opts?: SafeFetchOptions,
 ): Promise<FetchedImage | null> {
-  return doFetch(rawUrl, opts, 0);
+  return doFetch(rawUrl, opts ?? {}, 0, opts?.deps ?? defaultSafeFetcherDeps);
 }
 
 async function validateAndNormalize(
@@ -151,8 +223,9 @@ async function validateAndNormalize(
 
 async function doFetch(
   rawUrl: string,
-  opts: SafeFetchOptions | undefined,
+  opts: SafeFetchOptions,
   redirectCount: number,
+  deps: SafeFetcherDependencies,
 ): Promise<FetchedImage | null> {
   if (redirectCount > MAX_REDIRECTS) return null;
 
@@ -179,178 +252,137 @@ async function doFetch(
   const maxPixels = opts?.maxPixels ?? env.avatarMaxPixels;
   const timeoutMs = opts?.timeoutMs ?? 5_000;
 
-  // 5. Resolve hostname → semua IP
+  // 5. Resolve hostname → semua IP via injectable lookup
   let addresses: dns.LookupAddress[];
   try {
-    addresses = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+    addresses = await deps.lookup(hostname);
   } catch {
     return null;
   }
 
   if (!addresses || addresses.length === 0) return null;
 
-  // 6. Validasi SEMUA IP — semua harus publik (fail-closed)
+  // 6. DNS POLICY (terdokumentasi, dipilih eksplisit):
+  //    resolve semua → discard non-publik → wajib ≥1 publik → pin SATU alamat
+  //    publik tervalidasi. (Bukan "semua IP harus publik"; mixed private/public
+  //    DITERIMA dengan tetap memakai alamat publik tervalidasi saja.)
   const publicAddresses = addresses.filter(
     (a) => !isPrivateIP(a.address, a.family as 4 | 6),
   );
   if (publicAddresses.length === 0) return null;
 
-  // Pilih IP pertama yang valid
   const chosen = publicAddresses[0];
   const chosenIp = chosen.address;
   const chosenFamily = chosen.family as 4 | 6;
 
-  // 7. Buat HTTPS request menggunakan node:https dengan TLS SNI yang benar:
-  //    - hostname (TCP target): validated IP
-  //    - servername (TLS SNI): original hostname
+  // 7. HTTPS request via injectable transport:
+  //    - TCP target: validated public IP (DNS pinning)
+  //    - TLS servername (SNI): original hostname
   //    - Host header: original hostname
   //    - TLS verification: ENABLED (default)
-  const rawBuffer = await httpsGet({
+  //    - TIDAK meneruskan X-Api-Key / Authorization / Cookie
+  const headers: Record<string, string> = {
+    'Host': hostname,
+    'User-Agent': 'WahaBot/2.0 (sticker-service)',
+  };
+
+  const response = await deps.request({
     ip: chosenIp,
     family: chosenFamily,
     hostname,
+    port: 443,
     path: parsed.pathname + parsed.search,
+    headers,
     timeoutMs,
     maxBytes,
-    onRedirect: async (location: string): Promise<Buffer | null> => {
-      let absLocation: string;
-      try {
-        absLocation = new URL(location, rawUrl).toString();
-      } catch {
-        return null;
-      }
-      // Re-validasi full dari awal (DNS + IP + HTTPS)
-      const result = await doFetch(absLocation, opts, redirectCount + 1);
-      // Return raw sentinel — redirects are handled by returning the validated+normalized result
-      // We break here and signal to httpsGet to return null (redirect handled by doFetch)
-      // Instead: store result and return a special value — simplest: use a callback approach
-      return result?.buffer ?? null;
-    },
-  });
+  }).catch(() => null);
 
+  if (!response) return null;
+
+  const status = response.statusCode;
+
+  // Redirect: re-validasi penuh (DNS+IP+HTTPS) pada target dari Location.
+  if (status >= 300 && status < 400) {
+    const location = response.headers['location'];
+    response.destroy();
+    if (!location || typeof location !== 'string') return null;
+    let absLocation: string;
+    try {
+      absLocation = new URL(location, rawUrl).toString();
+    } catch {
+      return null;
+    }
+    return doFetch(absLocation, opts, redirectCount + 1, deps);
+  }
+
+  if (status < 200 || status >= 300) {
+    response.destroy();
+    return null;
+  }
+
+  // Validasi Content-Type (MIME allowlist)
+  const ct = (response.headers['content-type'] || '').toLowerCase().split(';')[0].trim();
+  if (!ALLOWED_AVATAR_MIMES.has(ct)) {
+    response.destroy();
+    return null;
+  }
+
+  // Early size check dari Content-Length
+  const clHeader = response.headers['content-length'];
+  if (clHeader) {
+    const cl = parseInt(clHeader, 10);
+    if (!isNaN(cl) && cl > maxBytes) {
+      response.destroy();
+      return null;
+    }
+  }
+
+  // Baca body dengan batas byte aktual; hancurkan transport saat overflow.
+  const rawBuffer = await readLimitedBody(response, maxBytes);
   if (!rawBuffer) return null;
 
   // 8. Sharp validation + normalize
   return validateAndNormalize(rawBuffer, maxPixels);
 }
 
-interface HttpsGetOptions {
-  ip: string;
-  family: 4 | 6;
-  hostname: string;
-  path: string;
-  timeoutMs: number;
-  maxBytes: number;
-  onRedirect: (location: string) => Promise<Buffer | null>;
-}
+function readLimitedBody(
+  response: SafeHttpResponse,
+  maxBytes: number,
+): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let finished = false;
 
-function httpsGet(options: HttpsGetOptions): Promise<Buffer | null> {
-  return new Promise<Buffer | null>((resolve) => {
-    const { ip, family, hostname, path, timeoutMs, maxBytes, onRedirect } = options;
-
-    const timer = setTimeout(() => {
-      resolve(null);
-      req.destroy();
-    }, timeoutMs);
-
-    const reqOptions: https.RequestOptions = {
-      hostname: family === 6 ? `[${ip}]` : ip,
-      servername: hostname, // TLS SNI = original hostname
-      port: 443,
-      path,
-      method: 'GET',
-      headers: {
-        'Host': hostname, // HTTP Host header = original hostname
-        'User-Agent': 'WahaBot/2.0 (sticker-service)',
-        // TIDAK meneruskan X-Api-Key, Authorization, Cookie, dll
-      },
-      // TLS verification ENABLED (rejectUnauthorized tidak di-set → default true)
+    const finish = (value: Buffer | null) => {
+      if (finished) return;
+      finished = true;
+      resolve(value);
     };
 
-    const req = https.request(reqOptions, (res) => {
-      const status = res.statusCode ?? 0;
-
-      if (status >= 300 && status < 400) {
-        const location = res.headers['location'];
-        clearTimeout(timer);
-        req.destroy();
-        if (!location || typeof location !== 'string') {
-          resolve(null);
-          return;
-        }
-        onRedirect(location).then(resolve).catch(() => resolve(null));
+    response.stream.on('data', (chunk: Buffer) => {
+      if (finished) return;
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        response.destroy();
+        finish(null); // transport aborted karena oversized
         return;
       }
-
-      if (status < 200 || status >= 300) {
-        clearTimeout(timer);
-        req.destroy();
-        resolve(null);
-        return;
-      }
-
-      // Validasi Content-Type
-      const ct = (res.headers['content-type'] || '').toLowerCase().split(';')[0].trim();
-      if (!ALLOWED_AVATAR_MIMES.has(ct)) {
-        clearTimeout(timer);
-        req.destroy();
-        resolve(null);
-        return;
-      }
-
-      // Early size check dari Content-Length
-      const clHeader = res.headers['content-length'];
-      if (clHeader) {
-        const cl = parseInt(clHeader, 10);
-        if (!isNaN(cl) && cl > maxBytes) {
-          clearTimeout(timer);
-          req.destroy();
-          resolve(null);
-          return;
-        }
-      }
-
-      const chunks: Buffer[] = [];
-      let totalBytes = 0;
-      let finished = false;
-
-      res.on('data', (chunk: Buffer) => {
-        if (finished) return;
-        totalBytes += chunk.length;
-        if (totalBytes > maxBytes) {
-          finished = true;
-          clearTimeout(timer);
-          req.destroy();
-          resolve(null);
-          return;
-        }
-        chunks.push(chunk);
-      });
-
-      res.on('end', () => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        if (totalBytes === 0) {
-          resolve(null);
-          return;
-        }
-        resolve(Buffer.concat(chunks));
-      });
-
-      res.on('error', () => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        resolve(null);
-      });
+      chunks.push(chunk);
     });
 
-    req.on('error', () => {
-      clearTimeout(timer);
-      resolve(null);
+    response.stream.on('end', () => {
+      if (finished) return;
+      if (totalBytes === 0) {
+        finish(null);
+        return;
+      }
+      finish(Buffer.concat(chunks));
     });
 
-    req.end();
+    response.stream.on('error', () => {
+      if (finished) return;
+      finish(null);
+    });
   });
 }

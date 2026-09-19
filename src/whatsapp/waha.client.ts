@@ -6,6 +6,18 @@ import { logger } from '../observability/logger';
 import { hashIdentifier } from '../observability/privacy';
 import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
 
+/**
+ * Response resmi WAHA untuk GET /api/{session}/chats/{chatId}/picture
+ * (docs: https://waha.devlike.pro/docs/how-to/chats/):
+ *   { "url": "https://..." } — `url` adalah field terdokumentasi;
+ *   `url` dapat bernilai null bila chat tidak punya foto profil.
+ * `pictureUrl` HANYA fallback kompatibilitas untuk deployment lama/non-resmi.
+ */
+export interface WahaPictureResponse {
+  url?: string | null;
+  pictureUrl?: string | null;
+}
+
 // Klien WAHA mengikuti docs resmi: POST /api/<action> dengan session di body JSON.
 export class WAHAClient {
   private readonly baseUrl: string;
@@ -235,10 +247,10 @@ export class WAHAClient {
       );
       clearTimeout(timeout);
       if (!res.ok) return null;
-      const data = (await res.json()) as any;
-      // WAHA Swagger: response field adalah `pictureUrl` (bukan `url`).
-      // Fallback ke `url` untuk kompatibilitas deployment lama.
-      const pictureUrl: string | null | undefined = data?.pictureUrl ?? data?.url;
+      const data = (await res.json()) as WahaPictureResponse;
+      // `url` adalah field TERDOKUMENTASI WAHA saat ini — diprioritaskan.
+      // `pictureUrl` hanya fallback kompatibilitas, bukan field resmi.
+      const pictureUrl: string | null | undefined = data?.url ?? data?.pictureUrl;
       if (!pictureUrl) return null;
       return this.fetchExternalImage(pictureUrl);
     } catch {
