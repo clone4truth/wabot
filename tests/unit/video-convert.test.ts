@@ -9,6 +9,26 @@ import { ToImageProcessor } from '../../src/stickers/processors/toimg.processor'
 import { ToGifProcessor } from '../../src/stickers/processors/togif.processor';
 import { AppError } from '../../src/errors/app-error';
 import { ErrorCode } from '../../src/errors/error-codes';
+import env from '../../src/config/env';
+
+// Isolasi tempDir PER FILE test: test 'workspace bersih' di file ini (dan di
+// attp.test.ts) menghitung file 'togif-*'/'*.mp4' di env.tempDir. Worker vitest
+// lain (webhook, processor-deadline) menulis file serupa secara PARALEL di
+// tempDir bersama -> salah dihitung sebagai leak (flaky CI). env.tempDir dibaca
+// saat process() berjalan, jadi override di beforeAll cukup.
+let privateTempDir: string;
+let savedTempDir: string;
+
+beforeAll(() => {
+  privateTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vidconv-test-'));
+  savedTempDir = env.tempDir;
+  env.tempDir = privateTempDir;
+});
+
+afterAll(() => {
+  env.tempDir = savedTempDir;
+  fs.rmSync(privateTempDir, { recursive: true, force: true });
+});
 
 const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
 vi.mock('../../src/media/downloader', () => ({
@@ -131,10 +151,12 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
   it('!togif timeout -> PROCESSING_TIMEOUT + workspace bersih', async () => {
     const env = (await import('../../src/config/env')).default;
     const fs = await import('fs');
+    // Snapshot SETELAH VideoStickerProcessor selesai: output .webp-nya sudah
+    // dibersihkan oleh processor itu sendiri, jadi tidak terhitung sebagai leak.
+    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
     const before = new Set(
       fs.readdirSync(env.tempDir).filter((f: string) => f.startsWith('togif-') || f.endsWith('.mp4')),
     );
-    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
     await expect(new ToGifProcessor().process(animated.buffer, 50)).rejects.toMatchObject({
       code: ErrorCode.PROCESSING_TIMEOUT,
     });
@@ -144,10 +166,11 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
 
   it('!togif konkuren: workspace UUID tidak tabrakan + bersih', async () => {
     const env = (await import('../../src/config/env')).default;
+    // Snapshot SETELAH VideoStickerProcessor selesai (lihat catatan test timeout).
+    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
     const before = new Set(
       (await import('fs')).readdirSync(env.tempDir).filter((f: string) => f.startsWith('togif-')),
     );
-    const animated = await new VideoStickerProcessor().process('http://x/short.mp4');
     const results = await Promise.all([
       new ToGifProcessor().process(animated.buffer),
       new ToGifProcessor().process(animated.buffer),

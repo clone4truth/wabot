@@ -1,6 +1,29 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Sharp from 'sharp';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { AttpProcessor } from '../../src/stickers/processors/attp.processor';
+import env from '../../src/config/env';
+
+// Isolasi tempDir PER FILE test: worker vitest lain (webhook, processor-deadline,)
+// juga membuat file 'attp-*' di tempDir bersama secara paralel — tanpa isolasi,
+// test leak-check di file ini bisa salah menghitung file worker lain sebagai
+// kebocoran (flaky CI). env.tempDir dibaca saat process() berjalan, jadi
+// override di beforeAll cukup.
+let privateTempDir: string;
+let savedTempDir: string;
+
+beforeAll(() => {
+  privateTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attp-test-'));
+  savedTempDir = env.tempDir;
+  env.tempDir = privateTempDir;
+});
+
+afterAll(() => {
+  env.tempDir = savedTempDir;
+  fs.rmSync(privateTempDir, { recursive: true, force: true });
+});
 
 describe('AttpProcessor (teks animasi)', () => {
   it('menghasilkan webp animasi 8 frame dengan dimensi aktual 512x512', async () => {
