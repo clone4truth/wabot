@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Deploy beruntun ke VPS yang sama harus antre, bukan berebut
+# (cancel berbahaya di tengah deploy — biarkan selesai satu per satu).
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write

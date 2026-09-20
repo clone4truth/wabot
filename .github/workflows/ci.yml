@@ -1,10 +1,17 @@
 name: CI
 
+# CI hanya untuk pull request & manual — push ke main ditangani CD
+# (job quality-nya menjalankan gate yang sama), agar tidak ada
+# dua workflow yang menguji commit yang sama dua kali.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# Push cepat beruntun ke satu PR: batalkan run lama yang sudah usang.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
