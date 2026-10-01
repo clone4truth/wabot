@@ -29,6 +29,7 @@ describe('manual WhatsApp session control', () => {
     vi.stubGlobal('document', Object.assign(new EventTarget(), { hidden: false }));
     vi.spyOn(api, 'whatsapp').mockResolvedValue({ ...session });
     vi.spyOn(api, 'whatsappQr').mockResolvedValue({ dataUrl: 'new-qr' });
+    vi.spyOn(api, 'whatsappProfile').mockResolvedValue({ id: '62812345@c.us', name: 'Test Bot', picture: null });
     vi.spyOn(api, 'whatsappAction').mockResolvedValue({ ok: true });
   });
   afterEach(() => {
@@ -45,6 +46,7 @@ describe('manual WhatsApp session control', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     expect(api.whatsapp).not.toHaveBeenCalled();
     expect(api.whatsappQr).not.toHaveBeenCalled();
+    expect(api.whatsappProfile).not.toHaveBeenCalled();
     expect(api.whatsappAction).not.toHaveBeenCalled();
     await control.refresh();
     expect(api.whatsapp).toHaveBeenCalledTimes(1);
@@ -100,5 +102,42 @@ describe('manual WhatsApp session control', () => {
     expect(api.whatsapp).not.toHaveBeenCalled();
     expect(api.whatsappQr).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('replaces QR with the profile on WORKING and clears the profile when disconnected', async () => {
+    const control = mount();
+    vi.mocked(api.whatsapp).mockResolvedValue({ ...session, status: 'SCAN_QR_CODE' });
+    await control.refresh();
+    expect(control.qr.value).toBe('new-qr');
+    expect(api.whatsappProfile).not.toHaveBeenCalled();
+    vi.mocked(api.whatsapp).mockResolvedValue({ ...session, status: 'WORKING' });
+    await control.refresh();
+    expect(control.qr.value).toBeNull();
+    expect(control.profile.value?.name).toBe('Test Bot');
+    expect(api.whatsappProfile).toHaveBeenCalledTimes(1);
+    expect(api.whatsappQr).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(api.whatsappProfile).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.mocked(api.whatsapp).mockResolvedValue({ ...session });
+    await control.perform('stop');
+    expect(control.profile.value).toBeNull();
+    expect(control.qr.value).toBeNull();
+  });
+
+  it('keeps a connected account manageable if its profile cannot be loaded', async () => {
+    const control = mount();
+    vi.mocked(api.whatsapp).mockResolvedValue({ ...session, status: 'WORKING', me: { id: '62812345@c.us', pushName: 'Fallback name' } });
+    vi.mocked(api.whatsappProfile).mockRejectedValue(new ApiError('upstream secret', 502));
+    await control.refresh();
+    expect(control.session.value?.status).toBe('WORKING');
+    expect(control.session.value?.me?.pushName).toBe('Fallback name');
+    expect(control.error.value).toBeNull();
+    expect(control.profile.value).toBeNull();
+    expect(control.profileError.value).toBeTruthy();
+    expect(control.profileError.value).not.toContain('secret');
+    expect(api.whatsappQr).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(api.whatsappProfile).toHaveBeenCalledTimes(1);
   });
 });

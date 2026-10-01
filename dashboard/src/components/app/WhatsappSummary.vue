@@ -25,6 +25,7 @@ const status = computed(() => whatsappStatus(data.value?.status))
             <Badge v-else :variant="error ? 'destructive' : status.variant">{{ error ? 'Tidak dapat diperiksa' : status.label }}</Badge>
           </div>
           <p class="max-w-prose text-sm text-muted-foreground">{{ error || status.description }}</p>
+          <p v-if="!error && data?.status === 'WORKING' && data.me?.pushName" class="max-w-prose break-words text-sm font-medium [overflow-wrap:anywhere]">{{ data.me.pushName }}</p>
         </div>
       </div>
       <div class="flex flex-wrap gap-2">

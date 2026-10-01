@@ -10,6 +10,8 @@ coverage/
 .vscode/
 *.pem
 *.secret
+.freebuff/
+.start-dbg.sh
 npm-debug.log*
 sharp-*
 ffmpeg-*

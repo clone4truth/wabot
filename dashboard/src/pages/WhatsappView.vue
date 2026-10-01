@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { CheckCircle2, MessageCircle, Power, QrCode, RefreshCw, RotateCcw, Smartphone, Unplug } from '@lucide/vue'
+import { MessageCircle, Power, QrCode, RefreshCw, RotateCcw, Smartphone, Unplug } from '@lucide/vue'
 import { useWhatsapp } from '@/composables/use-whatsapp'
 import { whatsappStatus } from '@/lib/whatsapp'
 import type { WhatsappAction } from '@/lib/api'
 import PageHeader from '@/components/app/PageHeader.vue'
 import DataError from '@/components/app/DataError.vue'
+import WhatsappAccount from '@/components/app/WhatsappAccount.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
-const { session, qr, qrError, loading, error, updatedAt, busy, actionError, refresh, perform } = useWhatsapp()
+const { session, qr, qrError, profile, profileError, loading, error, updatedAt, busy, actionError, refresh, perform } = useWhatsapp()
 const status = computed(() => whatsappStatus(session.value?.status))
 const connected = computed(() => session.value?.status === 'WORKING')
 const canStart = computed(() => !session.value || ['MISSING', 'STOPPED', 'FAILED'].includes(session.value.status))
@@ -56,14 +57,7 @@ function run(action: WhatsappAction) {
         </CardHeader>
         <CardContent class="space-y-6">
           <Skeleton v-if="loading && !session" class="mx-auto size-64 max-w-full" />
-          <div v-else-if="connected" class="flex flex-col items-center gap-4 rounded-lg bg-muted/50 px-5 py-10 text-center">
-            <div class="grid size-14 place-items-center rounded-full bg-primary/10 text-primary"><CheckCircle2 class="size-7" /></div>
-            <div class="space-y-1">
-              <h2 class="text-lg font-semibold">WhatsApp berhasil terhubung</h2>
-              <p class="text-sm text-muted-foreground">{{ session?.me?.pushName || 'Akun WhatsApp' }}</p>
-              <p v-if="session?.me?.id" class="break-all text-sm tabular-nums">{{ session.me.id.split('@')[0] }}</p>
-            </div>
-          </div>
+          <WhatsappAccount v-else-if="connected" :profile="profile" :me="session?.me ?? null" :error="profileError" />
           <div v-else-if="session?.status === 'SCAN_QR_CODE'" class="space-y-4 text-center">
             <div class="mx-auto flex aspect-square w-72 max-w-full items-center justify-center rounded-xl border bg-white p-4">
               <img v-if="qr" :src="qr" alt="QR penautan akun WhatsApp" class="size-full object-contain" width="256" height="256" />
@@ -94,7 +88,7 @@ function run(action: WhatsappAction) {
       </Card>
 
       <div class="space-y-6">
-        <Card>
+        <Card v-if="!connected">
           <CardHeader><CardTitle class="text-base">Cara menautkan perangkat</CardTitle><CardDescription>Gunakan aplikasi WhatsApp di ponsel Anda.</CardDescription></CardHeader>
           <CardContent>
             <ol class="space-y-5 text-sm leading-relaxed">

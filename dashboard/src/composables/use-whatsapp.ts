@@ -1,7 +1,7 @@
 import { userMessage } from '../lib/presentation'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { api, ApiError, type WhatsappAction } from '../lib/api'
+import { api, ApiError, type WhatsappAction, type WhatsappProfile } from '../lib/api'
 import { usePolling } from './use-polling'
 
 export function useWhatsapp() {
@@ -11,6 +11,8 @@ export function useWhatsapp() {
     const session = await api.whatsapp(signal)
     let qr: string | null = null
     let qrError: string | null = null
+    let profile: WhatsappProfile | null = null
+    let profileError: string | null = null
     if (session.status === 'SCAN_QR_CODE') {
       try {
         qr = (await api.whatsappQr(signal)).dataUrl
@@ -20,7 +22,15 @@ export function useWhatsapp() {
         qrError = userMessage(error, 'QR belum tersedia.')
       }
     }
-    return { session, qr, qrError }
+    if (session.status === 'WORKING') {
+      try {
+        profile = await api.whatsappProfile(signal)
+      } catch (error) {
+        if (signal.aborted || (error instanceof ApiError && error.status === 401)) throw error
+        profileError = 'Koneksi aktif. Profil lengkap belum dapat dimuat; coba Perbarui lagi nanti.'
+      }
+    }
+    return { session, qr, qrError, profile, profileError }
   }, { intervalMs: 15_000 })
   // Manual refresh only: never start the polling loop or request on mount.
 
@@ -55,6 +65,8 @@ export function useWhatsapp() {
     session: computed(() => poll.data.value?.session ?? null),
     qr: computed(() => poll.error.value ? null : poll.data.value?.qr ?? null),
     qrError: computed(() => poll.data.value?.qrError ?? null),
+    profile: computed(() => poll.error.value ? null : poll.data.value?.profile ?? null),
+    profileError: computed(() => poll.data.value?.profileError ?? null),
     busy, actionError, perform,
   }
 }

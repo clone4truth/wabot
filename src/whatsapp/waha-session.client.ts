@@ -8,6 +8,12 @@ export interface WahaSession {
   me?: { id?: string; pushName?: string } | null;
 }
 
+export interface WahaProfile {
+  id: string;
+  name: string | null;
+  picture: string | null;
+}
+
 export class WahaSessionError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message);
@@ -97,6 +103,28 @@ export class WahaSessionClient {
 
   async action(action: 'start' | 'stop' | 'restart' | 'logout'): Promise<void> {
     await this.request(`${this.sessionPath}/${action}`, 'POST');
+  }
+
+  async getProfile(): Promise<WahaProfile> {
+    const profile = await this.request<{ id?: unknown; name?: unknown; picture?: unknown }>(
+      `/api/${encodeURIComponent(this.session)}/profile`,
+    );
+    if (!profile || typeof profile.id !== 'string' || !profile.id) {
+      throw new WahaSessionError('Profil WhatsApp belum tersedia. Coba perbarui.');
+    }
+    let picture: string | null = null;
+    if (typeof profile.picture === 'string') {
+      // Only passive image sources; never expose embedded URL credentials or SVG.
+      if (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(profile.picture)) {
+        picture = profile.picture;
+      } else {
+        try {
+          const url = new URL(profile.picture);
+          if (url.protocol === 'https:' && !url.username && !url.password) picture = url.href;
+        } catch { /* Missing or invalid photo uses the avatar fallback. */ }
+      }
+    }
+    return { id: profile.id, name: typeof profile.name === 'string' ? profile.name : null, picture };
   }
 
   async getQr(): Promise<{ dataUrl: string }> {

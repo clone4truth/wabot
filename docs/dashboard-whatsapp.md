@@ -25,6 +25,7 @@ Semua endpoint berikut memerlukan cookie admin dan mengembalikan `no-store`:
 |---|---|---|
 | GET | `/api/admin/whatsapp` | Status sesi yang dikonfigurasi server; 404 upstream menjadi MISSING |
 | GET | `/api/admin/whatsapp/qr` | PNG data URL ketika SCAN_QR_CODE; selain itu 409 |
+| GET | `/api/admin/whatsapp/profile` | Profil akun (id, name, picture) ketika WORKING; selain itu 409 |
 | POST | `/api/admin/whatsapp/start` | Tombol Mulai sesi: create jika belum ada, start STOPPED, restart FAILED; idempotent untuk sesi berjalan |
 | POST | `/api/admin/whatsapp/connect` | Alias kompatibilitas untuk `/start` |
 | POST | `/api/admin/whatsapp/restart` | Restart sesi WAHA |
@@ -53,6 +54,14 @@ background. Mutasi sesi yang berhasil menghapus kedua cache agar QR lama tidak
 dipakai kembali. Operasi identik dari beberapa tab dibatasi 15 detik dengan 429
 dan Retry-After; `/connect` berbagi batas yang sama dengan `/start`. Aksi lain,
 seperti stop setelah start, tetap dapat dijalankan.
+
+Saat WORKING, dashboard tidak mengambil QR dan menampilkan profil dari
+`GET /api/{session}/profile`: nama, nomor akun, serta foto dengan Avatar shadcn-vue.
+Profil memakai cache 60 detik (termasuk kegagalan), berbagi request bersamaan,
+dan dihapus saat mutasi, sesi tidak lagi WORKING, atau identitas akun berubah.
+Tidak ada polling profil. Setelah scan, klik Perbarui untuk mengganti QR dengan
+profil. Jika profil/foto tidak tersedia, informasi `me` dan inisial tetap
+ditampilkan; kegagalan profil tidak memblokir pengelolaan koneksi.
 
 ## Verifikasi
 

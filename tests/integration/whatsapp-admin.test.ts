@@ -20,6 +20,9 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   let status: string | null;
   let failStatus = 0;
   let qr = QR;
+  let accountId = '62812345@c.us';
+  let profile: Record<string, unknown>;
+  let profileFailStatus = 0;
   let now = Date.now();
   const calls: Array<{ method?: string; url?: string; body: any; key?: string; accept?: string }> = [];
 
@@ -40,12 +43,17 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
         res.end(JSON.stringify({ data: qr, mimetype: 'image/png' }));
         return;
       }
+      if (req.url === '/api/default/profile') {
+        if (profileFailStatus) res.writeHead(profileFailStatus);
+        res.end(JSON.stringify(profile));
+        return;
+      }
       if (req.method === 'GET') {
         if (!status) {
           res.writeHead(404);
           res.end('{}');
         } else {
-          res.end(JSON.stringify({ name: 'default', status, engine: { engine: 'WEBJS' }, me: status === 'WORKING' ? { id: '62812345@c.us', pushName: 'Test Bot' } : null, config: { webhooks: [{ hmac: { key: 'hmac-must-stay-server-side' } }], proxy: { password: API_KEY } } }));
+          res.end(JSON.stringify({ name: 'default', status, engine: { engine: 'WEBJS' }, me: status === 'WORKING' ? { id: accountId, pushName: 'Test Bot' } : null, config: { webhooks: [{ hmac: { key: 'hmac-must-stay-server-side' } }], proxy: { password: API_KEY } } }));
         }
         return;
       }
@@ -66,10 +74,13 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   });
 
   beforeEach(() => {
-    now += 16_000;
+    now += 61_000;
     status = 'STOPPED';
     failStatus = 0;
     qr = QR;
+    accountId = '62812345@c.us';
+    profile = { id: accountId, name: 'Test Bot', picture: 'https://example.com/avatar.jpg', secret: API_KEY };
+    profileFailStatus = 0;
     calls.length = 0;
     env.wahaBotWebhookUrl = 'http://sticker-bot:3000/webhooks';
   });
@@ -86,8 +97,8 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   const action = (name: string) => app.inject({ method: 'POST', url: `/api/admin/whatsapp/${name}`, headers: { cookie } });
 
   it('requires admin authentication for status, QR and every mutation', async () => {
-    for (const path of ['', '/qr', '/start', '/connect', '/restart', '/stop', '/logout']) {
-      const response = await app.inject({ method: ['', '/qr'].includes(path) ? 'GET' : 'POST', url: `/api/admin/whatsapp${path}` });
+    for (const path of ['', '/qr', '/profile', '/start', '/connect', '/restart', '/stop', '/logout']) {
+      const response = await app.inject({ method: ['', '/qr', '/profile'].includes(path) ? 'GET' : 'POST', url: `/api/admin/whatsapp${path}` });
       expect(response.statusCode).toBe(401);
     }
     expect(calls).toHaveLength(0);
@@ -265,5 +276,69 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
     expect((await action('stop')).statusCode).toBe(200);
     now += 16_000;
     expect((await action('start')).statusCode).toBe(200);
+  });
+
+  it('fetches and projects the connected account profile, coalescing simultaneous requests', async () => {
+    status = 'WORKING';
+    const responses = await Promise.all(Array.from({ length: 20 }, () => get('/profile')));
+    expect(responses.every(response => response.statusCode === 200)).toBe(true);
+    expect(responses[0].json()).toEqual({ id: accountId, name: 'Test Bot', picture: 'https://example.com/avatar.jpg' });
+    expect(responses[0].body).not.toContain(API_KEY);
+    expect(responses[0].headers['cache-control']).toBe('no-store');
+    expect(calls.filter(call => call.url === '/api/sessions/default')).toHaveLength(1);
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(1);
+    expect(calls.some(call => call.url?.endsWith('/auth/qr'))).toBe(false);
+    now += 16_000;
+    await get('/profile');
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(1);
+    now += 45_000;
+    await get('/profile');
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(2);
+  });
+
+  it('does not fetch profiles before pairing or after a stop, and invalidates them on mutation', async () => {
+    for (const value of [null, 'STOPPED', 'STARTING', 'SCAN_QR_CODE']) {
+      now += 16_000;
+      status = value;
+      expect((await get('/profile')).statusCode).toBe(409);
+    }
+    expect(calls.some(call => call.url === '/api/default/profile')).toBe(false);
+    now += 16_000;
+    status = 'WORKING';
+    await get('/profile');
+    await action('stop');
+    expect((await get('/profile')).statusCode).toBe(409);
+    now += 16_000;
+    status = 'WORKING';
+    profile.name = 'Updated name';
+    expect((await get('/profile')).json().name).toBe('Updated name');
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(2);
+  });
+
+  it('invalidates a cached profile when another account is paired', async () => {
+    status = 'WORKING';
+    await get('/profile');
+    now += 16_000;
+    accountId = '62899999@c.us';
+    profile = { id: accountId, name: 'New account', picture: null };
+    expect((await get('/profile')).json()).toEqual(profile);
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(2);
+  });
+
+  it('caches profile failures without hiding a working connection', async () => {
+    status = 'WORKING';
+    profileFailStatus = 503;
+    for (let i = 0; i < 3; i++) expect((await get('/profile')).statusCode).toBe(502);
+    expect((await get()).json().status).toBe('WORKING');
+    expect(calls.filter(call => call.url === '/api/default/profile')).toHaveLength(1);
+  });
+
+  it('uses no photo for unsafe sources and allows missing names or pictures', async () => {
+    status = 'WORKING';
+    for (const picture of [null, 'javascript:alert(1)', 'data:image/svg+xml;base64,PHN2Zy8+', 'https://user:secret@example.com/photo.jpg']) {
+      now += 61_000;
+      profile = { id: accountId, name: null, picture };
+      expect((await get('/profile')).json()).toEqual({ id: accountId, name: null, picture: null });
+    }
   });
 });

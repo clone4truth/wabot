@@ -192,6 +192,12 @@ export interface WhatsappSession {
 
 export type WhatsappAction = 'start' | 'connect' | 'stop' | 'restart' | 'logout'
 
+export interface WhatsappProfile {
+  id: string
+  name: string | null
+  picture: string | null
+}
+
 // ---- Endpoints ----
 
 export const api = {
@@ -212,6 +218,8 @@ export const api = {
   whatsapp: (signal?: AbortSignal) => request<WhatsappSession>('/api/admin/whatsapp', { signal }),
 
   whatsappQr: (signal?: AbortSignal) => request<{ dataUrl: string }>('/api/admin/whatsapp/qr', { signal }, 25_000),
+
+  whatsappProfile: (signal?: AbortSignal) => request<WhatsappProfile>('/api/admin/whatsapp/profile', { signal }, 25_000),
 
   whatsappAction: (action: WhatsappAction) =>
     request<{ ok: true }>(`/api/admin/whatsapp/${action}`, { method: 'POST' }, 25_000),

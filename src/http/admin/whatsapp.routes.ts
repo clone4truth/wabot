@@ -3,10 +3,11 @@ import env from '../../config/env';
 import { WahaSessionClient, WahaSessionError } from '../../whatsapp/waha-session.client';
 
 const READ_CACHE_MS = 15_000;
+const PROFILE_CACHE_MS = 60_000;
 const ACTION_COOLDOWN_MS = 15_000;
 
 /** Share one upstream request, including failures, without background timers. */
-function cachedRead<T>(load: () => Promise<T>) {
+function cachedRead<T>(load: () => Promise<T>, ttlMs = READ_CACHE_MS) {
   let cached: Promise<T> | undefined;
   let settled = false;
   let expiresAt = 0;
@@ -19,7 +20,7 @@ function cachedRead<T>(load: () => Promise<T>) {
       const complete = () => {
         if (cached !== pending) return;
         settled = true;
-        expiresAt = Date.now() + READ_CACHE_MS;
+        expiresAt = Date.now() + ttlMs;
       };
       pending.then(complete, complete);
       return pending;
@@ -43,7 +44,16 @@ function webhookConfigured(): boolean {
 /** Register inside the authenticated admin scope only. */
 export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<void> {
   const waha = new WahaSessionClient();
-  const sessionRead = cachedRead(() => waha.getSession());
+  const profileRead = cachedRead(() => waha.getProfile(), PROFILE_CACHE_MS);
+  let profileOwner: string | undefined;
+  const sessionRead = cachedRead(async () => {
+    const session = await waha.getSession();
+    if (session?.status !== 'WORKING' || session.me?.id !== profileOwner) {
+      profileRead.clear();
+      profileOwner = session?.me?.id;
+    }
+    return session;
+  });
   const qrRead = cachedRead(() => waha.getQr());
   // Only the four whitelisted actions can enter this map.
   const nextActionAt = new Map<string, number>();
@@ -74,7 +84,7 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
       exists: session !== null,
       status: session?.status ?? 'MISSING',
       engine: typeof session?.engine === 'string' ? session.engine : session?.engine?.engine ?? null,
-      me: session?.me ? { id: session.me.id, pushName: session.me.pushName } : null,
+      me: session?.status === 'WORKING' && session.me ? { id: session.me.id, pushName: session.me.pushName } : null,
       webhookConfigured: webhookConfigured(),
     };
   });
@@ -85,6 +95,14 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
       return reply.code(409).send({ error: 'QR belum tersedia. Tunggu sesi siap dipindai.' });
     }
     return qrRead.read();
+  });
+
+  secure.get('/api/admin/whatsapp/profile', async (_request, reply) => {
+    const session = await sessionRead.read();
+    if (session?.status !== 'WORKING') {
+      return reply.code(409).send({ error: 'Profil tersedia setelah WhatsApp terhubung.' });
+    }
+    return profileRead.read();
   });
 
   secure.post<{ Params: { action: string } }>('/api/admin/whatsapp/:action', async (request, reply) => {
@@ -129,6 +147,7 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
       if (changed) {
         sessionRead.clear();
         qrRead.clear();
+        profileRead.clear();
       }
       return { ok: true };
     } finally {
