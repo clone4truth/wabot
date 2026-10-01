@@ -8,8 +8,9 @@
  * bisa salah menghitung file milik worker lain sebagai kebocoran — kegagalan
  * flaky yang muncul di CI (lihat !togif timeout -> workspace bersih).
  *
- * Solusi: tiap run test mendapat TEMP_DIR + DATA_DIR unik (mkdtemp), dihapus
- * lagi setelah semua selesai. Tidak ada test yang bergantung pada lokasi
+ * Solusi: buat root sementara per run, lalu setup-test-dirs.ts membuat
+ * TEMP_DIR + DATA_DIR unik per file test. Semua dihapus setelah run selesai.
+ * Tidak ada test yang bergantung pada lokasi
  * fisik tempDir — semuanya membaca env.tempDir secara dinamis.
  */
 import fs from 'fs';
@@ -20,8 +21,8 @@ export default function setup(): void {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wabot-test-tmp-'));
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wabot-test-data-'));
 
-  process.env.TEMP_DIR = tempDir;
-  process.env.DATA_DIR = dataDir;
+  process.env.WABOT_TEST_TEMP_ROOT = tempDir;
+  process.env.WABOT_TEST_DATA_ROOT = dataDir;
 
   const cleanup = () => {
     try {

@@ -424,9 +424,7 @@ describe('Webhook end-to-end', () => {
   });
 
   it('!prefix lihat + ubah + dipakai', async () => {
-    const { getSharedStore } = await import('../../src/storage/json-store');
     const chat = uid('chatprefix') + '@c.us';
-    const store = getSharedStore(env.dataDir);
     try {
       const show = await postWebhook(rawMessage('!prefix', { from: chat }));
       expect(show.statusCode).toBe(200);
@@ -442,7 +440,7 @@ describe('Webhook end-to-end', () => {
       expect(used.statusCode).toBe(200);
       expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('Pong');
     } finally {
-      store.delete(`prefix:${chat}`);
+      runtimeConfig.clearPrefix(chat);
     }
   });
 });

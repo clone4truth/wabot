@@ -150,6 +150,7 @@ describe('Runtime config via API', () => {
   afterEach(() => {
     env.adminPassword = savedPassword;
     runtimeConfig.reset();
+    for (const { chatId } of runtimeConfig.listPrefixes()) runtimeConfig.clearPrefix(chatId);
   });
 
   async function authed(method: 'GET' | 'PUT' | 'POST', url: string, payload?: unknown) {
