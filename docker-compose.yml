@@ -12,14 +12,38 @@ services:
       - WAHA_API_KEY=${WAHA_API_KEY}
       - WAHA_SESSION=${WAHA_SESSION}
       - WAHA_WEBHOOK_HMAC_KEY=${WAHA_WEBHOOK_HMAC_KEY}
+      - WAHA_BOT_WEBHOOK_URL=${WAHA_BOT_WEBHOOK_URL:-}
       - APP_ENV=production
       - LOG_LEVEL=warn
       - DATA_DIR=/app/data
+      # Runtime tuning — WAJIB untuk VPS kecil. Tanpa ini sharp memakai
+      # `availableParallelism()` thread per gambar dan menahan 20 file
+      # descriptor di cache libvips.
+      - SHARP_CONCURRENCY=${SHARP_CONCURRENCY:-1}
+      - SHARP_CACHE_MEMORY_MB=${SHARP_CACHE_MEMORY_MB:-16}
+      - SHARP_CACHE_FILES=${SHARP_CACHE_FILES:-0}
+      - MAX_INPUT_PIXELS=${MAX_INPUT_PIXELS:-25000000}
+      # Dashboard admin. Kosongkan ADMIN_PASSWORD untuk mematikan panel.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DASHBOARD_DIST=/app/dashboard-dist
     volumes:
       - ./data:/app/data
     tmpfs:
       # Media sementara diproses di RAM — tidak menyentuh disk VPS.
       - /tmp:rw,size=256m
+    # BATAS WAJIB. Tanpa ini, lonjakan sharp/ffmpeg membuat kernel OOM-kill
+    # seluruh host (WAHA ikut mati). Dengan batas, hanya container ini yang
+    # throttle lalu restart, dan `restart: unless-stopped` yang menjaganya.
+    mem_limit: ${STICKER_BOT_MEM_LIMIT:-768m}
+    mem_reservation: 256m
+    cpus: ${STICKER_BOT_CPUS:-1.5}
+    pids_limit: 256
+    ulimits:
+      nofile:
+        # Batas FD keras. Kebocoran socket (response body tak dibaca) akan
+        # menabrak ini dan menghasilkan error 5xx, bukan menjatuhkan host.
+        soft: 4096
+        hard: 8192
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]

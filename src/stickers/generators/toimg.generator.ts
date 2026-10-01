@@ -5,7 +5,9 @@ import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 import { cleanupTempFile } from '../../media/temp-files';
-import Sharp from 'sharp';
+import env from '../../config/env';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import fs from 'fs';
 
 export class ToImageGenerator implements StickerGenerator {
@@ -25,13 +27,17 @@ export class ToImageGenerator implements StickerGenerator {
 
   async process(input: GeneratorInput): Promise<ProcessingResult> {
     const url = input.mediaUrl ?? (input.content?.mediaUrl as string);
-    const { filePath } = await downloadMedia(url);
+    // WAJIB teruskan signal: tanpa ini JobManager tidak bisa membatalkan job yang
+    // macet di download, dan slot 'image' (MAX_IMAGE_JOBS=4) tertahan selamanya
+    // sehingga semua request berikutnya kena JOB_QUEUE_FULL.
+    const timeoutMs = input.timeoutMs ?? env.imageProcessingTimeoutMs;
+    const { filePath } = await downloadMedia(url, { timeoutMs, signal: input.signal });
 
     try {
       const stickerBuffer = await fs.promises.readFile(filePath);
-      let meta: Sharp.Metadata;
+      let meta: sharp.Metadata;
       try {
-        meta = await Sharp(stickerBuffer).metadata();
+        meta = await sharp(stickerBuffer, sharpInputOptions()).metadata();
       } catch {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
       }

@@ -1,10 +1,11 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { randomUUID } from 'crypto';
 import { VideoResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { cleanupTempFile, createTempFile } from '../../media/temp-files';
-import { getVideoMetadata, runFfmpegWithTimeout } from '../../media/ffmpeg';
+import { getVideoMetadata, runFfmpegWithTimeout, FFMPEG_THREAD_ARGS } from '../../media/ffmpeg';
 import env from '../../config/env';
 import fs from 'fs';
 import path from 'path';
@@ -21,7 +22,7 @@ export class ToGifProcessor {
 
     let meta;
     try {
-      meta = await Sharp(stickerBuffer).metadata();
+      meta = await sharp(stickerBuffer, sharpInputOptions()).metadata();
     } catch {
       throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
     }
@@ -101,7 +102,7 @@ export class ToGifProcessor {
         const plan = framePlans[i];
         const frameFileName = `${i}.png`;
         const framePath = path.join(workdir, frameFileName);
-        const png = await Sharp(stickerBuffer, { page: plan.pageIndex }).png().toBuffer();
+        const png = await sharp(stickerBuffer, { ...sharpInputOptions(), page: plan.pageIndex }).png().toBuffer();
         await fs.promises.writeFile(framePath, png);
 
         concatLines.push(`file '${frameFileName}'`);
@@ -127,6 +128,7 @@ export class ToGifProcessor {
       await runFfmpegWithTimeout([
         '-y',
         '-loglevel', 'error',
+        ...FFMPEG_THREAD_ARGS,
         '-f', 'concat',
         '-safe', '0',
         '-i', concatFilePath,

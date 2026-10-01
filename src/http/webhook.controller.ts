@@ -42,6 +42,19 @@ commandRouter.register('togif', createTogifHandler(stickerService));
 commandRouter.register('emoji', createStikerHandler(stickerService));
 commandRouter.register('badge', createStikerHandler(stickerService));
 
+/**
+ * Hentikan timer background milik singleton modul ini.
+ *
+ * IdempotencyGuard, MemoryRateLimiter, dan AccessGuard masing-masing menjalankan
+ * sweep interval (unref'd, jadi tidak menahan event loop). Dipanggil dari
+ * server.ts saat graceful shutdown.
+ */
+export function stopRuntimeTimers(): void {
+  idempotency.stop();
+  rateLimiter.stop();
+  accessGuard.stop();
+}
+
 export async function webhookController(request: FastifyRequest, reply: FastifyReply) {
   const startTime = Date.now();
 

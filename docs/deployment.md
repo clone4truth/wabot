@@ -166,7 +166,36 @@ WABOT_IMAGE=ghcr.io/clone4truth/wabot:sha-abc1234 docker compose up -d
 
 ---
 
-## 7. Troubleshooting
+## 7. Dashboard Admin
+
+Panel admin (Vue 3 + shadcn-vue) disajikan Fastify di `/dashboard` — satu container,
+tanpa web server tambahan.
+
+Aktif di VPS dengan menambahkan ke `.env`:
+
+```bash
+ADMIN_PASSWORD=<password-kuat>
+```
+
+Dikosongkan ⇒ dashboard mati total (`/api/admin/*` membalas 503) dan tidak ada
+permukaan admin yang perlu dikuatkan.
+
+Build sudah ikut di pipeline Docker (`dashboard-builder` stage → `/app/dashboard-dist`),
+jadi tidak ada langkah manual setelah deploy. Kalau route `/dashboard` 404, cek log
+startup: `Dashboard SPA belum di-build`.
+
+Reverse proxy (aaPanel/Caddy) tidak perlu rule tambahan — cukup arahkan path yang
+sudah ada ke `127.0.0.1:3001`. Pastikan tidak ada basic-auth di lapisan proxy yang
+menggantikan login dashboard, dan sajikan lewat HTTPS: cookie session memakai flag
+`Secure` saat `APP_ENV=production`.
+
+Operasi dari dashboard (edit limit runtime, prefix per chat, restart, purge temp)
+langsung menulis ke `bot-state.json` di volume `./data` — jadi bertahan melewati
+restart container.
+
+---
+
+## 8. Troubleshooting
 
 | Gejala | Kemungkinan | Solusi |
 |---|---|---|
@@ -175,6 +204,10 @@ WABOT_IMAGE=ghcr.io/clone4truth/wabot:sha-abc1234 docker compose up -d
 | `git reset --hard` gagal | Folder bukan clone git | Jalankan `git clone` atau biarkan (step di-skip bila tidak ada `.git`) |
 | Health check gagal, container jalan | WAHA belum siap / URL salah | Cek `WAHA_BASE_URL`; `/health` hanya liveness bot |
 | Webhook WAHA tidak sampai | Reverse proxy belum diarahkan | aaPanel proxy → `127.0.0.1:3001` |
+| `/dashboard` 404 | SPA belum ter-build | `cd dashboard && npm run build`, atau cek log `Dashboard SPA belum di-build` |
+| Dashboard 503 | `ADMIN_PASSWORD` kosong | Set di `.env`, lalu restart container |
+| `EMFILE` di log | Bocor FD (regresi) | `docker compose exec sticker-bot sh -c 'ls /proc/1/fd \| wc -l'` — harus stabil, tidak naik per request |
+| OOM-kill di `docker inspect` | Memori container habis | Naikkan `STICKER_BOT_MEM_LIMIT`, atau turunkan `MAX_INPUT_PIXELS` / `MAX_*_JOBS` |
 
 ---
 
@@ -184,3 +217,7 @@ WABOT_IMAGE=ghcr.io/clone4truth/wabot:sha-abc1234 docker compose up -d
 - SSH key deploy = akses root. Simpan private key hanya di GitHub Secrets, dan rotasi bila terindikasi bocor.
 - `security_opt: no-new-privileges`, `tmpfs /tmp`, log rotation sudah aktif di compose.
 - Pertimbangkan membatasi SSH ke key-only (`PasswordAuthentication no`).
+- Dashboard memakai password tunggal + session cookie `HttpOnly`/`SameSite=Strict`.
+  Ganti password lalu gunakan "Cabut semua sesi" bila password pernah terekspos.
+- `mem_limit`/`cpus`/`pids_limit` di compose bukan opsional: tanpa batas, lonjakan
+  sharp/ffmpeg membuat kernel OOM-kill seluruh host beserta WAHA.

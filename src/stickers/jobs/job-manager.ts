@@ -149,6 +149,60 @@ export class JobManager {
     });
   }
 
+  /**
+   * Ringkasan untuk dashboard admin: jumlah job per status, kedalaman antrean,
+   * dan kapasitas yang terpakai. Cheap — iterasi `jobs` yang sudah di-cap 200
+   * entri completed oleh pruneOldJobs().
+   */
+  stats(): {
+    byStatus: Record<JobStatus, number>;
+    active: number;
+    queues: Record<JobType, { depth: number; limit: number; active: number; maxQueue: number }>;
+    recent: JobMetadata[];
+  } {
+    const byStatus: Record<JobStatus, number> = {
+      QUEUED: 0,
+      PROCESSING: 0,
+      DONE: 0,
+      FAILED: 0,
+      CANCELLED: 0,
+    };
+    const recent: JobMetadata[] = [];
+
+    for (const job of this.jobs.values()) {
+      byStatus[job.status]++;
+      if (job.status === 'QUEUED' || job.status === 'PROCESSING') recent.push(job);
+    }
+
+    // Job yang sudah selesai juga berguna untuk overview (last result), tapi
+    // jangan menimpa daftar yang sedang berjalan.
+    for (const job of this.jobs.values()) {
+      if (job.status === 'DONE' || job.status === 'FAILED') recent.push(job);
+    }
+    recent.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return {
+      byStatus,
+      active: Object.values(this.activeCount).reduce((sum, n) => sum + n, 0),
+      queues: {
+        image: this.queueStat('image'),
+        video: this.queueStat('video'),
+        animation: this.queueStat('animation'),
+        background: this.queueStat('background'),
+      },
+      recent: recent.slice(0, 50),
+    };
+  }
+
+  private queueStat(type: JobType): { depth: number; limit: number; active: number; maxQueue: number } {
+    return {
+      depth: this.queues[type].length,
+      limit: this.limits[type].concurrency,
+      active: this.activeCount[type],
+      maxQueue: this.limits[type].maxQueue,
+    };
+  }
+
   getJob(jobId: string): JobMetadata | undefined {
     return this.jobs.get(jobId);
   }

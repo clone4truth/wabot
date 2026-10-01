@@ -7,7 +7,7 @@ import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { createTempFile, cleanupTempFile } from '../../media/temp-files';
-import { runFfmpegWithTimeout } from '../../media/ffmpeg';
+import { runFfmpegWithTimeout, FFMPEG_THREAD_ARGS } from '../../media/ffmpeg';
 import { logger } from '../../observability/logger';
 import { escapeXml, validateText, wrapWords } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
@@ -86,6 +86,7 @@ export class AttpProcessor {
 
       await runFfmpegWithTimeout([
         '-y', '-loglevel', 'error',
+        ...FFMPEG_THREAD_ARGS,
         '-framerate', String(fps),
         '-i', path.join(workdir, '%d.png'),
         '-c:v', 'libwebp',

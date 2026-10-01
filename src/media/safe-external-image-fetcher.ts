@@ -27,7 +27,7 @@
 import dns from 'node:dns';
 import https from 'node:https';
 import type { IncomingMessage } from 'node:http';
-import Sharp from 'sharp';
+import sharp from 'sharp';
 import env from '../config/env';
 
 const MAX_REDIRECTS = 3;
@@ -230,9 +230,9 @@ async function validateAndNormalize(
   raw: Buffer,
   maxPixels: number,
 ): Promise<FetchedImage | null> {
-  let metadata: Sharp.Metadata;
+  let metadata: sharp.Metadata;
   try {
-    metadata = await Sharp(raw, {
+    metadata = await sharp(raw, {
       failOn: 'warning',
       limitInputPixels: maxPixels,
     }).metadata();
@@ -246,13 +246,16 @@ async function validateAndNormalize(
   // Normalisasi ke ≤256×256
   let finalBuffer: Buffer;
   try {
+    // Batas piksel WAJIB ikut di instance yang benar-benar meng-decode. Kalau hanya
+    // di .metadata(), instance di bawah jatuh ke default Sharp 268 juta piksel.
+    const inputOptions = { failOn: 'warning' as const, limitInputPixels: maxPixels };
     if (metadata.width > 256 || metadata.height > 256) {
-      finalBuffer = await Sharp(raw)
+      finalBuffer = await sharp(raw, inputOptions)
         .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
         .png()
         .toBuffer();
     } else {
-      finalBuffer = await Sharp(raw).png().toBuffer();
+      finalBuffer = await sharp(raw, inputOptions).png().toBuffer();
     }
   } catch {
     return null;

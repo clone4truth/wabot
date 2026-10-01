@@ -6,7 +6,8 @@ import env from '../config/env';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { validateMediaFile, isAllowedOrigin } from './validator';
-import { createTempFile, scheduleCleanup } from './temp-files';
+import { createTempFile, cleanupTempFile } from './temp-files';
+import { discardResponseBody } from './http-body';
 
 export interface DownloadResult {
   filePath: string;
@@ -40,11 +41,22 @@ function assertHttpUrl(raw: string): URL {
 
 // Fetch manual agar setiap redirect ikut divalidasi exact WAHA origin allowlist (tidak buta
 // mengikuti redirect ke host external/attacker).
+//
+// PENTING: AbortController + timeout TIDAK boleh di-dispose saat fungsi ini return.
+// Head response sudah diterima, tapi body masih harus dibaca. Jika timer di-clear di
+// sini, host yang mengirim header lalu diam akan menahan `for await` di readLimited()
+// selamanya — job occupy slot JobManager tanpa batas dan hanya released setelah restart
+// proses. Karena itu timeout ikut dikembalikan ke caller.
+interface PendingFetch {
+  response: Response;
+  dispose: () => void;
+}
+
 async function fetchValidated(
   url: string,
   opts: { timeoutMs: number; signal?: AbortSignal },
   remaining: number = MAX_REDIRECTS,
-): Promise<Response> {
+): Promise<PendingFetch> {
   assertHttpUrl(url);
   if (!isAllowedOrigin(url)) {
     throw new Error(`SSRF violation: URL not allowed (${redactUrl(url)})`);
@@ -62,6 +74,14 @@ async function fetchValidated(
   }
 
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const dispose = () => {
+    clearTimeout(timeout);
+    if (externalHandler && opts.signal) {
+      opts.signal.removeEventListener('abort', externalHandler);
+    }
+  };
+
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -73,17 +93,14 @@ async function fetchValidated(
       const location = response.headers.get('location');
       if (!location) throw new Error('Redirect tanpa Location');
       await response.arrayBuffer().catch(() => {});
+      dispose();
       return fetchValidated(new URL(location, url).toString(), opts, remaining - 1);
     }
-    return response;
+    return { response, dispose };
   } catch (err) {
+    dispose();
     if (err instanceof Error && /SSRF|redirect/i.test(err.message)) throw err;
     throw new Error(`Failed to download media: ${String(err)}`);
-  } finally {
-    clearTimeout(timeout);
-    if (externalHandler && opts.signal) {
-      opts.signal.removeEventListener('abort', externalHandler);
-    }
   }
 }
 
@@ -107,56 +124,78 @@ async function readLimited(response: Response, maxBytes: number): Promise<Buffer
 export async function downloadMedia(mediaUrl: string, options?: DownloadOptions): Promise<DownloadResult> {
   const resolvedUrl = resolveMediaUrl(mediaUrl);
   const effectiveTimeoutMs = options?.timeoutMs ?? FETCH_TIMEOUT_MS;
-  const response = await fetchValidated(resolvedUrl, {
+  const { response, dispose } = await fetchValidated(resolvedUrl, {
     timeoutMs: Math.min(effectiveTimeoutMs, FETCH_TIMEOUT_MS * 3), // cap at 45s
     signal: options?.signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to download media: ${response.status}`);
+  // Setiap exit sebelum body dibaca penuh harus destroy body DAN dispose timer,
+  // kalau tidak satu file descriptor socket bocor permanen per request.
+  const bail = (err: Error): never => {
+    discardResponseBody(response);
+    dispose();
+    throw err;
+  };
+
+  try {
+    if (!response.ok) {
+      bail(new Error(`Failed to download media: ${response.status}`));
+    }
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    // Batas streaming = yang terbesar agar tipe terdeteksi dulu dari magic bytes;
+    // batas spesifik tipe ditegakkan setelah magic terdeteksi.
+    const streamCap = Math.max(env.maxImageBytes, env.maxVideoBytes);
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > streamCap) {
+      bail(new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit'));
+    }
+
+    const buffer = await readLimited(response, streamCap);
+
+    const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? '.jpg'
+      : contentType.includes('png') ? '.png'
+        : contentType.includes('webp') ? '.webp'
+          : contentType.includes('mp4') || contentType.includes('video') ? '.mp4' : '.bin';
+
+    const filePath = createTempFile(ext);
+    try {
+      await fs.promises.writeFile(filePath, buffer);
+    } catch (err) {
+      // ENOSPC/EACCES di tmpfs: file sudah dibuat tapi tidak bisa ditulis.
+      // Tanpa cleanup di sini file yatim menumpuk sampai tmpfs 256m penuh.
+      cleanupTempFile(filePath);
+      throw err;
+    }
+
+    const valid = await validateMediaFile(filePath, [
+      'image/jpeg', 'image/png', 'image/webp', 'video/mp4'
+    ]);
+
+    if (!valid.valid) {
+      cleanupTempFile(filePath);
+      throw new Error('Downloaded file content validation failed');
+    }
+
+    // Tegakkan limit spesifik tipe media aktual (bukan declared).
+    const typeCap = valid.detectedMime?.startsWith('video')
+      ? env.maxVideoBytes
+      : env.maxImageBytes;
+    if (buffer.length > typeCap) {
+      cleanupTempFile(filePath);
+      throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
+    }
+
+    logger.info('Media downloaded', { mimeType: contentType, size: buffer.length });
+
+    return { filePath, mimeType: contentType, size: buffer.length };
+  } finally {
+    // Body mungkin sudah full-read (jalur sukses) atau terputus tengah (readLimited
+    // kena batas byte). destroy() pada stream yang sudah selesai tidak harmful,
+    // sedangkan tidak destroy() = satu socket bocor.
+    discardResponseBody(response);
+    dispose();
   }
-
-  const contentType = response.headers.get('content-type') || 'application/octet-stream';
-  // Batas streaming = yang terbesar agar tipe terdeteksi dulu dari magic bytes;
-  // batas spesifik tipe ditegakkan setelah magic terdeteksi.
-  const streamCap = Math.max(env.maxImageBytes, env.maxVideoBytes);
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > streamCap) {
-    throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
-  }
-
-  const buffer = await readLimited(response, streamCap);
-
-  const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? '.jpg'
-    : contentType.includes('png') ? '.png'
-    : contentType.includes('webp') ? '.webp'
-    : contentType.includes('mp4') || contentType.includes('video') ? '.mp4' : '.bin';
-
-  const filePath = createTempFile(ext);
-  await fs.promises.writeFile(filePath, buffer);
-
-  const valid = await validateMediaFile(filePath, [
-    'image/jpeg', 'image/png', 'image/webp', 'video/mp4'
-  ]);
-
-  if (!valid.valid) {
-    await fs.promises.unlink(filePath).catch(() => {});
-    throw new Error('Downloaded file content validation failed');
-  }
-
-  // Tegakkan limit spesifik tipe media aktual (bukan declared).
-  const typeCap = valid.detectedMime?.startsWith('video')
-    ? env.maxVideoBytes
-    : env.maxImageBytes;
-  if (buffer.length > typeCap) {
-    await fs.promises.unlink(filePath).catch(() => {});
-    throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Downloaded media exceeds size limit');
-  }
-
-  scheduleCleanup(filePath);
-  logger.info('Media downloaded', { mimeType: contentType, size: buffer.length });
-
-  return { filePath, mimeType: contentType, size: buffer.length };
 }
 
 // WAHA sering mengisi media.url dengan host lokalnya sendiri

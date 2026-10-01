@@ -22,22 +22,47 @@ export function cleanupTempFile(filePath: string): void {
 }
 
 export function scheduleCleanup(filePath: string, ttlMs: number = env.tempFileTtlSeconds * 1000): void {
-  setTimeout(() => cleanupTempFile(filePath), ttlMs);
+  const timer = setTimeout(() => cleanupTempFile(filePath), ttlMs);
+  // Tanpa unref, tiap pemanggilan menahan handle timer beserta closure-nya
+  // selama TTL penuh (300 detik default) — timer menumpuk sebanding dengan traffic.
+  timer.unref?.();
 }
 
+/**
+ * Hapus file yatim di direktori temp.
+ *
+ * Recursive karena `togif.processor` membuat subdirektori kerja per job
+ * (`togif-<uuid>/`) berisi satu PNG per frame. Semuanya ikut terhapus di sini.
+ */
 export function cleanupOrphanFiles(maxAgeMs: number = env.tempFileTtlSeconds * 1000): void {
-  const dir = env.tempDir;
-  if (!fs.existsSync(dir)) return;
   const now = Date.now();
-  for (const file of fs.readdirSync(dir)) {
-    const filePath = path.join(dir, file);
-    try {
-      const stat = fs.statSync(filePath);
-      if (now - stat.mtimeMs > maxAgeMs) {
-        fs.unlinkSync(filePath);
-      }
-    } catch {
-      // skip
+  for (const dir of [env.tempDir]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir)) {
+      sweepPath(path.join(dir, entry), now, maxAgeMs);
     }
+  }
+}
+
+function sweepPath(target: string, now: number, maxAgeMs: number): void {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(target);
+  } catch {
+    return;
+  }
+
+  // Bulat ke atas supaya file di dalam subdirektori yang baru saja dihapus
+  // ikut terpilih, bukan hanya direktori itu sendiri.
+  if (now - Math.max(stat.mtimeMs, stat.ctimeMs) <= maxAgeMs) return;
+
+  try {
+    if (stat.isDirectory()) {
+      fs.rmSync(target, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(target);
+    }
+  } catch {
+    // best-effort: file mungkin sedang dipakai proses lain
   }
 }

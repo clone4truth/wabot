@@ -19,6 +19,17 @@ COPY src ./src
 COPY tests ./tests
 RUN npm run build
 
+# ---- Dashboard SPA (Vue 3 + Vite + shadcn-vue) ----
+FROM node:22-alpine AS dashboard-builder
+
+WORKDIR /app
+
+COPY dashboard/package*.json ./dashboard/
+RUN cd dashboard && npm ci
+
+COPY dashboard ./dashboard
+RUN cd dashboard && npm run build   # output -> /dashboard-dist
+
 FROM node:22-alpine AS runtime
 
 RUN apk add --no-cache \
@@ -31,10 +42,18 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
+# Wajib diset SEBELUM proses Node start (hanya dibaca saat boot libuv).
+# Default libuv = 4 thread; itu menambah 4 OS thread yang bisa idle tapi tetap
+# menambah pressure scheduler pada VPS kecil.
+ENV UV_THREADPOOL_SIZE=1
+# Batasi jumlah memory pool glibc untuk kurangi fragmentasi RSS.
+ENV MALLOC_ARENA_MAX=2
+
 COPY package*.json ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
+COPY --from=dashboard-builder /dashboard-dist ./dashboard-dist
 
 EXPOSE 3000
 

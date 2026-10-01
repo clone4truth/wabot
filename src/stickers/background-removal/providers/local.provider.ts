@@ -1,11 +1,21 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
 import { BackgroundRemovalProvider, BackgroundRemovalOptions } from '../types';
+import env from '../../../config/env';
+import { AppError } from '../../../errors/app-error';
+import { ErrorCode } from '../../../errors/error-codes';
 
 export class LocalBackgroundRemovalProvider implements BackgroundRemovalProvider {
   readonly name = 'local';
 
-  async removeBackground(input: Buffer, _options?: BackgroundRemovalOptions): Promise<Buffer> {
-    const sharpImg = Sharp(input).ensureAlpha();
+  async removeBackground(input: Buffer, options?: BackgroundRemovalOptions): Promise<Buffer> {
+    if (options?.signal?.aborted) {
+      throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan');
+    }
+
+    // WAJIB: tanpa limitInputPixels, gambar 16384x16384 di-decode jadi ~1 GB
+    // raw RGBA, lalu `new Buffer(data)` di bawah menambah salinan kedua.
+    const sharpImg = sharp(input, { limitInputPixels: env.backgroundRemovalMaxPixels, failOn: 'warning' })
+      .ensureAlpha();
     const { data, info } = await sharpImg.raw().toBuffer({ resolveWithObject: true });
     const { width, height, channels } = info;
 
@@ -28,7 +38,14 @@ export class LocalBackgroundRemovalProvider implements BackgroundRemovalProvider
     bgB = Math.round(bgB / corners.length);
 
     const threshold = 35;
-    const out = Buffer.from(data);
+    // `data` sudah dipegang sharp sebagai buffer milik kita; tulis ulang alpha
+    // secara in-place. `Buffer.from(data)` di sini berarti alokasi kedua sebesar
+    // penuh (mis. 100 MB pada 25 MP) hanya untuk menulis byte yang sama.
+    const out = data;
+
+    if (options?.signal?.aborted) {
+      throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan');
+    }
 
     for (let i = 0; i < out.length; i += channels) {
       const r = out[i];
@@ -44,7 +61,7 @@ export class LocalBackgroundRemovalProvider implements BackgroundRemovalProvider
       }
     }
 
-    return Sharp(out, {
+    return sharp(out, {
       raw: { width, height, channels },
     })
       .png()

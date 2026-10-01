@@ -6,7 +6,8 @@ import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 import { cleanupTempFile } from '../../media/temp-files';
 import env from '../../config/env';
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import fs from 'fs';
 
 export class ToGifGenerator implements StickerGenerator {
@@ -31,9 +32,9 @@ export class ToGifGenerator implements StickerGenerator {
 
     try {
       const stickerBuffer = await fs.promises.readFile(filePath);
-      let meta: Sharp.Metadata;
+      let meta: sharp.Metadata;
       try {
-        meta = await Sharp(stickerBuffer).metadata();
+        meta = await sharp(stickerBuffer, sharpInputOptions()).metadata();
       } catch {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
       }

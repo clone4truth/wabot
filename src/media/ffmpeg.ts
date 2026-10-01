@@ -22,6 +22,19 @@ export function getFFprobePath(): string {
 }
 
 /**
+ * Argumen yang wajib disisipkan di SETIAP pemanggilan ffmpeg.
+ *
+ * Tanpa ini ffmpeg memakai `-threads auto` (= satu thread per core) untuk decoder
+ * dan frame+slice threading libx264. Dengan MAX_VIDEO_JOBS=2 + MAX_ANIMATION_JOBS=2
+ * ada 4 proses ffmpeg yang masing-masing bisa memakai N thread, sehingga VPS 2 core
+ * jadi 4x oversubscribed: sharp ikut lambat dan event loop Node terlahap.
+ */
+export const FFMPEG_THREAD_ARGS: readonly string[] = [
+  '-threads', '1',
+  '-filter_threads', '1',
+];
+
+/**
  * Opsi runner child process.
  * - timeoutMs: budget ms untuk child process ini (harus SISA budget deadline, bukan budget baru).
  * - signal:    AbortSignal dari deadline; saat abort → child di-SIGKILL.
@@ -201,6 +214,8 @@ export async function convertVideoToAnimatedWebp(
     await runFfmpegWithTimeout([
       '-y',
       '-loglevel', 'error',
+      '-threads', '1',
+      '-filter_threads', '1',
       '-i', inputPath,
       '-vf', `scale=${maxWidth}:${maxWidth}:force_original_aspect_ratio=decrease`,
       '-t', String(maxDurationSec),

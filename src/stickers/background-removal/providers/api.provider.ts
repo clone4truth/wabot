@@ -1,8 +1,9 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
 import { BackgroundRemovalProvider, BackgroundRemovalOptions } from '../types';
 import env from '../../../config/env';
 import { AppError } from '../../../errors/app-error';
 import { ErrorCode } from '../../../errors/error-codes';
+import { discardResponseBody } from '../../../media/http-body';
 
 // MIME allowlist yang diterima dari BG removal API response.
 // Tidak menggunakan image/* karena SVG, GIF, dll tidak valid sebagai input stiker.
@@ -59,104 +60,113 @@ export class ApiBackgroundRemovalProvider implements BackgroundRemovalProvider {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/octet-stream',
-      };
-      if (env.backgroundRemovalApiKey) {
-        headers['Authorization'] = `Bearer ${env.backgroundRemovalApiKey}`;
-      }
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers,
-        body: input,
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new AppError(
-          ErrorCode.MEDIA_DECODE_FAILED,
-          `Background removal API error: HTTP ${response.status}`,
-        );
-      }
-
-      // Validasi MIME: hanya jpeg, png, webp (bukan image/*)
-      const rawContentType = (response.headers.get('content-type') || '').toLowerCase();
-      const contentType = rawContentType.split(';')[0].trim();
-      if (contentType && !ALLOWED_RESPONSE_MIMES.has(contentType)) {
-        throw new AppError(
-          ErrorCode.MEDIA_DECODE_FAILED,
-          `Tipe konten API background removal tidak valid (${contentType}). Hanya jpeg/png/webp diizinkan.`,
-        );
-      }
-
-      const maxBytes = env.backgroundRemovalMaxResponseBytes || 20971520;
-      const chunks: Buffer[] = [];
-      let totalBytes = 0;
-
-      if (!response.body) {
-        throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Body respons API kosong');
-      }
-
-      const reader = response.body.getReader();
+      let response: Response | undefined;
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            totalBytes += value.byteLength;
-            if (totalBytes > maxBytes) {
-              await reader.cancel();
-              throw new AppError(
-                ErrorCode.MEDIA_TOO_LARGE,
-                'Respons background removal API melebihi batas ukuran',
-              );
-            }
-            chunks.push(Buffer.from(value));
-          }
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/octet-stream',
+        };
+        if (env.backgroundRemovalApiKey) {
+          headers['Authorization'] = `Bearer ${env.backgroundRemovalApiKey}`;
         }
-      } finally {
-        reader.releaseLock();
-      }
 
-      const rawBuffer = Buffer.concat(chunks);
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          headers,
+          body: input,
+          signal: controller.signal,
+        });
 
-      // Validasi dengan Sharp: gunakan limitInputPixels untuk mencegah pixel bomb.
-      const maxPixels = env.backgroundRemovalMaxPixels || 25_000_000;
-      let metadata: Sharp.Metadata;
-      try {
-        metadata = await Sharp(rawBuffer, {
+        if (!response.ok) {
+          throw new AppError(
+            ErrorCode.MEDIA_DECODE_FAILED,
+            `Background removal API error: HTTP ${response.status}`,
+          );
+        }
+
+        // Validasi MIME: hanya jpeg, png, webp (bukan image/*)
+        const rawContentType = (response.headers.get('content-type') || '').toLowerCase();
+        const contentType = rawContentType.split(';')[0].trim();
+        if (contentType && !ALLOWED_RESPONSE_MIMES.has(contentType)) {
+          throw new AppError(
+            ErrorCode.MEDIA_DECODE_FAILED,
+            `Tipe konten API background removal tidak valid (${contentType}). Hanya jpeg/png/webp diizinkan.`,
+          );
+        }
+
+        const maxBytes = env.backgroundRemovalMaxResponseBytes || 20971520;
+        const chunks: Buffer[] = [];
+        let totalBytes = 0;
+
+        if (!response.body) {
+          throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Body respons API kosong');
+        }
+
+        const reader = response.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              totalBytes += value.byteLength;
+              if (totalBytes > maxBytes) {
+                await reader.cancel();
+                throw new AppError(
+                  ErrorCode.MEDIA_TOO_LARGE,
+                  'Respons background removal API melebihi batas ukuran',
+                );
+              }
+              chunks.push(Buffer.from(value));
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        const rawBuffer = Buffer.concat(chunks);
+
+        // Validasi dengan Sharp: gunakan limitInputPixels untuk mencegah pixel bomb.
+        const maxPixels = env.backgroundRemovalMaxPixels || 25_000_000;
+        let metadata: sharp.Metadata;
+        try {
+          metadata = await sharp(rawBuffer, {
+            failOn: 'warning',
+            limitInputPixels: maxPixels,
+          }).metadata();
+        } catch {
+          throw new AppError(
+            ErrorCode.MEDIA_DECODE_FAILED,
+            'Respons API background removal bukan gambar yang valid',
+          );
+        }
+
+        if (!metadata.width || !metadata.height || metadata.width <= 0 || metadata.height <= 0) {
+          throw new AppError(
+            ErrorCode.MEDIA_DECODE_FAILED,
+            'Dimensi gambar dari API background removal tidak valid',
+          );
+        }
+
+        // Validasi format aktual (bukan hanya MIME header)
+        if (metadata.format && !ALLOWED_RESPONSE_FORMATS.has(metadata.format)) {
+          throw new AppError(
+            ErrorCode.MEDIA_DECODE_FAILED,
+            `Format aktual gambar BG removal tidak valid: ${metadata.format}`,
+          );
+        }
+
+        return await sharp(rawBuffer, {
           failOn: 'warning',
           limitInputPixels: maxPixels,
-        }).metadata();
-      } catch {
-        throw new AppError(
-          ErrorCode.MEDIA_DECODE_FAILED,
-          'Respons API background removal bukan gambar yang valid',
-        );
+        })
+          .ensureAlpha()
+          .png()
+          .toBuffer();
+      } finally {
+        // Salah satu dari: HTTP error, MIME salah, body kosong, atau reader yang
+        // dibatalkan. Semua jalur itu meninggalkan response body belum habis →
+        // undici menahan socket di luar pool sampai bodyTimeout 300 detik.
+        discardResponseBody(response);
       }
-
-      if (!metadata.width || !metadata.height || metadata.width <= 0 || metadata.height <= 0) {
-        throw new AppError(
-          ErrorCode.MEDIA_DECODE_FAILED,
-          'Dimensi gambar dari API background removal tidak valid',
-        );
-      }
-
-      // Validasi format aktual (bukan hanya MIME header)
-      if (metadata.format && !ALLOWED_RESPONSE_FORMATS.has(metadata.format)) {
-        throw new AppError(
-          ErrorCode.MEDIA_DECODE_FAILED,
-          `Format aktual gambar BG removal tidak valid: ${metadata.format}`,
-        );
-      }
-
-      const resultBuffer = await Sharp(rawBuffer)
-        .ensureAlpha()
-        .png()
-        .toBuffer();
-
-      return resultBuffer;
     } catch (err: any) {
       if (err.name === 'AbortError' || err?.code === 'ABORT_ERR') {
         throw new AppError(

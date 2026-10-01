@@ -10,6 +10,8 @@ export interface EnvConfig {
   wahaApiKey: string;
   wahaSession: string;
   wahaWebhookHmacKey: string;
+  /** URL /webhooks bot yang dapat dijangkau server WAHA untuk sesi baru. */
+  wahaBotWebhookUrl: string;
   commandPrefix: string;
   allowedChatIds: string[];
   blockedSenderIds: string[];
@@ -49,6 +51,16 @@ export interface EnvConfig {
   batchMaxItems: number;
   batchConcurrency: number;
   jobHistoryTtlSeconds: number;
+  /** Jumlah thread libvips per gambar (0 = default = jumlah core). Default 1 untuk VPS kecil. */
+  sharpConcurrency: number;
+  /** Kuota cache operasi libvips dalam MB. */
+  sharpCacheMemoryMb: number;
+  /** Jumlah file yang boleh di-cache libvips (0 = jangan cache file = bebaskan FD). */
+  sharpCacheFiles: number;
+  /** Batas piksel input untuk SEMUA decode Sharp (cegah pixel bomb). */
+  maxInputPixels: number;
+  /** Password dashboard admin. Kosong = dashboard admin dinonaktifkan. */
+  adminPassword: string;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -63,6 +75,7 @@ const env: EnvConfig = {
   wahaApiKey: process.env.WAHA_API_KEY || '',
   wahaSession: process.env.WAHA_SESSION || 'default',
   wahaWebhookHmacKey: process.env.WAHA_WEBHOOK_HMAC_KEY || '',
+  wahaBotWebhookUrl: process.env.WAHA_BOT_WEBHOOK_URL || '',
   commandPrefix: process.env.COMMAND_PREFIX || '!',
   allowedChatIds: splitList(process.env.ALLOWED_CHAT_IDS),
   blockedSenderIds: splitList(process.env.BLOCKED_SENDER_IDS),
@@ -99,6 +112,11 @@ const env: EnvConfig = {
   batchMaxItems: Number(process.env.BATCH_MAX_ITEMS) || 10,
   batchConcurrency: Number(process.env.BATCH_CONCURRENCY) || 2,
   jobHistoryTtlSeconds: Number(process.env.JOB_HISTORY_TTL_SECONDS) || 3600,
+  sharpConcurrency: Number(process.env.SHARP_CONCURRENCY) || 1,
+  sharpCacheMemoryMb: Number(process.env.SHARP_CACHE_MEMORY_MB) || 16,
+  sharpCacheFiles: Number(process.env.SHARP_CACHE_FILES) || 0,
+  maxInputPixels: Number(process.env.MAX_INPUT_PIXELS) || 25_000_000,
+  adminPassword: process.env.ADMIN_PASSWORD || '',
 };
 
 export default env;

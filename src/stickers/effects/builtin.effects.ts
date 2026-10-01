@@ -1,4 +1,5 @@
 import Sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { ImageEffect } from './types';
 
 export class BlurEffect implements ImageEffect {
@@ -47,7 +48,7 @@ export class PixelEffect implements ImageEffect {
     const downscaledBuffer = await image
       .resize(pixelSize, pixelSize, { kernel: 'nearest' })
       .toBuffer();
-    return Sharp(downscaledBuffer).resize(512, 512, { kernel: 'nearest' });
+    return Sharp(downscaledBuffer, sharpInputOptions()).resize(512, 512, { kernel: 'nearest' });
   }
 }
 

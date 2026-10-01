@@ -1,4 +1,5 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { StickerResult } from '../result';
 import { renderFittedText } from '../rendering/text-layout';
 import { AppError } from '../../errors/app-error';
@@ -56,7 +57,7 @@ export class MemeProcessor {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format foto meme tidak didukung atau rusak');
       }
 
-      const imageBuffer = await Sharp(filePath).toBuffer();
+      const imageBuffer = await sharp(filePath, sharpInputOptions()).toBuffer();
 
       // Lebar teks meme dihitung terhadap canvas akhir 512px (bukan resolusi sumber yang mungkin cuma 100px).
       const textCanvasWidth = 460;
@@ -89,9 +90,9 @@ export class MemeProcessor {
           })).buffer
         : null;
 
-      let sharpInstance = Sharp(imageBuffer).resize(512, 512, { fit: 'cover' });
+      let sharpInstance = sharp(imageBuffer, sharpInputOptions()).resize(512, 512, { fit: 'cover' });
 
-      const composites: Sharp.OverlayOptions[] = [];
+      const composites: sharp.OverlayOptions[] = [];
       if (topBuffer) {
         composites.push({ input: topBuffer, gravity: 'north' });
       }
@@ -105,7 +106,7 @@ export class MemeProcessor {
       }
 
       const webpBuffer = await sharpInstance.webp({ quality: 90 }).toBuffer();
-      const meta = await Sharp(webpBuffer).metadata();
+      const meta = await sharp(webpBuffer).metadata();
 
       return {
         buffer: webpBuffer,

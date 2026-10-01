@@ -1,4 +1,5 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { StickerResult } from '../result';
 import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
@@ -7,14 +8,19 @@ import { ErrorCode } from '../../errors/error-codes';
 import { defaultEffectRegistry } from '../effects/registry';
 
 export class ImageStickerProcessor {
-  async process(imageUrl: string, modifier: string = 'full'): Promise<StickerResult> {
-    const { filePath, mimeType } = await this.downloadAndValidate(imageUrl);
+  async process(
+    imageUrl: string,
+    modifier: string = 'full',
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<StickerResult> {
+    const { filePath, mimeType } = await this.downloadAndValidate(imageUrl, timeoutMs, signal);
 
     try {
-      const metadata = await Sharp(filePath).metadata();
+      const metadata = await sharp(filePath, sharpInputOptions()).metadata();
       const canvasSize = { width: 512, height: 512 };
 
-      let sharpInstance = Sharp(filePath);
+      let sharpInstance = sharp(filePath, sharpInputOptions());
       let outWidth = canvasSize.width;
       let outHeight = canvasSize.height;
 
@@ -62,7 +68,7 @@ export class ImageStickerProcessor {
       }
 
       const webpBuffer = await sharpInstance.webp({ quality: 90 }).toBuffer();
-      const meta = await Sharp(webpBuffer).metadata();
+      const meta = await sharp(webpBuffer).metadata();
 
       return {
         buffer: webpBuffer,
@@ -77,12 +83,14 @@ export class ImageStickerProcessor {
     }
   }
 
-  private async downloadAndValidate(imageUrl: string) {
+  private async downloadAndValidate(imageUrl: string, timeoutMs?: number, signal?: AbortSignal) {
     let filePath: string;
     let mimeType: string;
     try {
+      // Deadline WAJIB diteruskan: download tanpa signal bisa menggantung dan
+      // memegang slot 'image' (MAX_IMAGE_JOBS=4) sampai proses di-restart.
       ({ filePath, mimeType } = await import('../../media/downloader').then(m =>
-        m.downloadMedia(imageUrl)
+        m.downloadMedia(imageUrl, { timeoutMs, signal })
       ));
     } catch (err) {
       if (err instanceof AppError) throw err;

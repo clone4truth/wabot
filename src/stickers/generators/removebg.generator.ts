@@ -8,6 +8,11 @@ import { downloadMedia } from '../../media/downloader';
 import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
 import { BackgroundRemovalService, defaultBackgroundRemovalService } from '../background-removal/service';
+import { sharpInputOptions } from '../../media/sharp-runtime';
+
+// Sisi terpanjang gambar analisis untuk smart-crop. Cukup presisi untuk
+// menentukan bounding box subjek, tapi hanya ~0.26 MP raw RGBA (1 MB).
+const SUBJECT_CROP_ANALYSIS_EDGE = 512;
 
 const OUTLINE_COLORS: Record<string, { r: number; g: number; b: number; alpha: number }> = {
   white: { r: 255, g: 255, b: 255, alpha: 1 },
@@ -106,8 +111,26 @@ export class RemoveBgGenerator implements StickerGenerator {
   }
 
   private async processSubjectSmartCrop(transparentPng: Buffer): Promise<Buffer> {
-    const sharpImg = Sharp(transparentPng).ensureAlpha();
-    const { data, info } = await sharpImg.raw().toBuffer({ resolveWithObject: true });
+    const originalMeta = await Sharp(transparentPng, sharpInputOptions()).metadata();
+    const origWidth = originalMeta.width ?? 0;
+    const origHeight = originalMeta.height ?? 0;
+
+    // Turunkan dulu ke resolusi yang cukup untuk menghitung bounding box subjek.
+    // Output akhir hanya 512x512, jadi resolusi penuh tidak menambah kualitas —
+    // hanya menghasilkan raw RGBA 100 MB (25 MP x 4) plus ~25 juta iterasi
+    // loop JS sinkron yang memblokir event loop (dan /health) selama detik-detik.
+    const analysisBuffer = await Sharp(transparentPng, sharpInputOptions())
+      .resize(SUBJECT_CROP_ANALYSIS_EDGE, SUBJECT_CROP_ANALYSIS_EDGE, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .png()
+      .toBuffer();
+
+    const { data, info } = await Sharp(analysisBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
     const { width, height, channels } = info;
 
     let minX = width;
@@ -137,17 +160,22 @@ export class RemoveBgGenerator implements StickerGenerator {
         .toBuffer();
     }
 
-    const subjectW = maxX - minX + 1;
-    const subjectH = maxY - minY + 1;
+    // Kembalikan koordinat ke skala gambar asli sebelum di-crop.
+    const scaleX = width > 0 ? origWidth / width : 1;
+    const scaleY = height > 0 ? origHeight / height : 1;
+    const boxMinX = Math.floor(minX * scaleX);
+    const boxMinY = Math.floor(minY * scaleY);
+    const subjectW = Math.max(1, Math.round((maxX - minX + 1) * scaleX));
+    const subjectH = Math.max(1, Math.round((maxY - minY + 1) * scaleY));
 
     // Add 12% safe padding
     const padX = Math.round(subjectW * 0.12);
     const padY = Math.round(subjectH * 0.12);
 
-    const cropX = Math.max(0, minX - padX);
-    const cropY = Math.max(0, minY - padY);
-    const cropW = Math.min(width - cropX, subjectW + padX * 2);
-    const cropH = Math.min(height - cropY, subjectH + padY * 2);
+    const cropX = Math.max(0, Math.min(origWidth - 1, boxMinX - padX));
+    const cropY = Math.max(0, Math.min(origHeight - 1, boxMinY - padY));
+    const cropW = Math.max(1, Math.min(origWidth - cropX, subjectW + padX * 2));
+    const cropH = Math.max(1, Math.min(origHeight - cropY, subjectH + padY * 2));
 
     return Sharp(transparentPng)
       .extract({ left: cropX, top: cropY, width: cropW, height: cropH })

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import crypto from 'crypto';
 import { fastify } from '../../src/app';
 import env from '../../src/config/env';
+import { runtimeConfig } from '../../src/config/runtime-config';
 
 // Mock transport WAHA: controller + service memakai mock ini, render stiker tetap asli.
 const wahaMocks = vi.hoisted(() => ({
@@ -370,31 +371,31 @@ describe('Webhook end-to-end', () => {
   });
 
   it('sender terblokir -> diam (200 tanpa aksi)', async () => {
-    env.blockedSenderIds = ['jahat@c.us'];
+    runtimeConfig.update({ blockedSenderIds: ['jahat@c.us'] });
     try {
       const res = await postWebhook(rawMessage('!ping', { from: 'jahat@c.us' }));
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body).denied).toBe('blocked');
       expect(wahaMocks.sendText).not.toHaveBeenCalled();
     } finally {
-      env.blockedSenderIds = [];
+      runtimeConfig.update({ blockedSenderIds: [] });
     }
   });
 
   it('chat di luar allowlist -> diam', async () => {
-    env.allowedChatIds = ['grup-utama@g.us'];
+    runtimeConfig.update({ allowedChatIds: ['grup-utama@g.us'] });
     try {
       const res = await postWebhook(rawMessage('!ping', { from: 'grup-lain@g.us' }));
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body).denied).toBe('chat');
       expect(wahaMocks.sendText).not.toHaveBeenCalled();
     } finally {
-      env.allowedChatIds = [];
+      runtimeConfig.update({ allowedChatIds: [] });
     }
   });
 
   it('admin-only: member ditolak, admin diproses', async () => {
-    env.groupAdminOnly = true;
+    runtimeConfig.update({ groupAdminOnly: true });
     wahaMocks.getGroupParticipants.mockResolvedValue([
       { id: 'bos@c.us', role: 'admin' },
       { id: 'warga@c.us', role: 'participant' },
@@ -417,7 +418,7 @@ describe('Webhook end-to-end', () => {
       expect(ok.statusCode).toBe(200);
       expect(wahaMocks.sendSticker).not.toHaveBeenCalled();
     } finally {
-      env.groupAdminOnly = false;
+      runtimeConfig.update({ groupAdminOnly: false });
       wahaMocks.getGroupParticipants.mockResolvedValue([]);
     }
   });

@@ -5,6 +5,7 @@ import { ErrorCode } from '../errors/error-codes';
 import { logger } from '../observability/logger';
 import { hashIdentifier } from '../observability/privacy';
 import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
+import { discardResponseBody } from '../media/http-body';
 
 /**
  * Response resmi WAHA untuk GET /api/{session}/chats/{chatId}/picture
@@ -60,6 +61,8 @@ export class WAHAClient {
     }
 
     if (!response.ok) {
+      // Body WAHA tidak dibaca pada jalur error — buang agar socket kembali ke pool.
+      discardResponseBody(response);
       logger.error(`WAHA ${action} failed with status ${response.status}`, {
         chatIdHash: logChatId ? hashIdentifier(logChatId) : undefined,
         status: response.status,
@@ -69,7 +72,11 @@ export class WAHAClient {
       throw appErr;
     }
 
-    return response.json().catch(() => ({}));
+    try {
+      return await response.json();
+    } catch {
+      return {};
+    }
   }
 
   private async post(path: string, body: Record<string, unknown>, action: string, chatId: string): Promise<any> {
@@ -132,13 +139,18 @@ export class WAHAClient {
   }
 
   // Best-effort: paksa engine me-load chat ke store (membantu chat @lid).
+  //
+  // PENTING: response WAHA sendSeen SELALU harus dibuang. Method ini dipanggil
+  // sebelum setiap sendSticker/sendImage/sendVideo; bila body tidak dibaca maka
+  // satu socket bocor permanen per stiker yang dikirim.
   private async ensureChatLoaded(chatId: string): Promise<void> {
     try {
-      await fetch(`${this.baseUrl}/api/sendSeen`, {
+      const res = await fetch(`${this.baseUrl}/api/sendSeen`, {
         method: 'POST',
         headers: this.headers(),
         body: JSON.stringify({ session: this.session, chatId }),
       });
+      discardResponseBody(res);
     } catch {
       // Abaikan — hanya pemanasan chat store.
     }
@@ -169,34 +181,40 @@ export class WAHAClient {
 
   // Best-effort: nama kontak yang TERSIMPAN di HP pemilik session (bukan pushName).
   async getContactSavedName(chatId: string): Promise<string | undefined> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(
         `${this.baseUrl}/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(this.session)}`,
         { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
       );
-      clearTimeout(timeout);
-      if (!res.ok) return undefined;
+      if (!res.ok) {
+        discardResponseBody(res);
+        return undefined;
+      }
       const data = (await res.json()) as any;
       return this.cleanName(data?.name);
     } catch {
       return undefined;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   // Best-effort: daftar partisipan grup + role (docs: participants/v2).
   // Role selain 'participant' (admin/superadmin) dianggap admin.
   async getGroupParticipants(groupId: string): Promise<{ id: string; role: string }[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4000);
       const res = await fetch(
         `${this.baseUrl}/api/${this.session}/groups/${encodeURIComponent(groupId)}/participants/v2`,
         { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
       );
-      clearTimeout(timeout);
-      if (!res.ok) return [];
+      if (!res.ok) {
+        discardResponseBody(res);
+        return [];
+      }
       const data = (await res.json()) as any;
       const list = Array.isArray(data) ? data : data?.participants || [];
       return list
@@ -204,18 +222,22 @@ export class WAHAClient {
         .map((p: any) => ({ id: p.id, role: String(p.role || 'participant') }));
     } catch {
       return [];
+    } finally {
+      clearTimeout(timeout);
     }
   }
   async getChatInfo(chatId: string): Promise<{ name?: string; picture?: string } | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
       const res = await fetch(
         `${this.baseUrl}/api/${this.session}/chats/overview?limit=1&ids=${encodeURIComponent(chatId)}`,
         { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
       );
-      clearTimeout(timeout);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        discardResponseBody(res);
+        return null;
+      }
       const data = (await res.json()) as any;
       const chat = Array.isArray(data) ? data[0] : data?.chats?.[0];
       if (!chat) return null;
@@ -225,6 +247,8 @@ export class WAHAClient {
       };
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -238,15 +262,17 @@ export class WAHAClient {
   // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.
   // Menggunakan SSRF-safe fetcher untuk URL picture yang dikembalikan WAHA.
   async getProfilePicture(chatId: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
       const res = await fetch(
         `${this.baseUrl}/api/${this.session}/chats/${encodeURIComponent(chatId)}/picture`,
         { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
       );
-      clearTimeout(timeout);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        discardResponseBody(res);
+        return null;
+      }
       const data = (await res.json()) as WahaPictureResponse;
       // `url` adalah field TERDOKUMENTASI WAHA saat ini — diprioritaskan.
       // `pictureUrl` hanya fallback kompatibilitas, bukan field resmi.
@@ -255,6 +281,8 @@ export class WAHAClient {
       return this.fetchExternalImage(pictureUrl);
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

@@ -1,15 +1,20 @@
 import Fastify from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import { Readable } from 'stream';
 import { webhookController } from './http/webhook.controller';
 import { healthController, readyController } from './http/health.controller';
-import { dashboardController } from './http/dashboard.controller';
-import { logsController } from './http/logs.controller';
+import { registerAdminRoutes } from './http/admin/admin.routes';
+import { registerDashboardStatic } from './http/admin/static';
 import env from './config/env';
 
 const fastify = Fastify({
   logger: env.logLevel !== 'silent',
   bodyLimit: 1_048_576,
 });
+
+// Dibutuhkan untuk session cookie dashboard admin (HttpOnly + SameSite).
+// Harus di-register SEBELUM admin routes agar dekorator `cookies` tersedia.
+fastify.register(fastifyCookie, { parseOptions: { path: '/' } });
 
 // Simpan raw body untuk verifikasi HMAC, lalu teruskan stream agar JSON parser tetap jalan.
 fastify.addHook('preParsing', async (request, _reply, payload) => {
@@ -26,19 +31,13 @@ fastify.post('/webhooks', { bodyLimit: 1_048_576 }, webhookController);
 fastify.get('/health', healthController);
 fastify.get('/ready', readyController);
 
-// Dashboard + log API hanya di non-production (hindari ekspos internal).
-// Gate per-request agar bisa diuji via perubahan env.appEnv.
-fastify.get('/dashboard', (request, reply) => {
-  if (env.appEnv === 'production') {
-    return reply.code(404).send({ error: 'Not found' });
-  }
-  return dashboardController(request, reply);
-});
-fastify.get('/api/logs', (request, reply) => {
-  if (env.appEnv === 'production') {
-    return reply.code(404).send({ error: 'Not found' });
-  }
-  return logsController(request, reply);
-});
+// Dashboard admin + API-nya. Semua /api/admin/* kecuali /login dan /session
+// dijaga session cookie (lihat admin.routes.ts).
+//
+// CATATAN: route lama /dashboard + /api/logs (HTML string tanpa auth) DIHAPUS.
+// Dashboard sekarang SPA Vue yang di-serve di /dashboard, dan log hanya lewat
+// /api/admin/logs yang butuh login.
+fastify.register(registerAdminRoutes);
+fastify.register(registerDashboardStatic);
 
 export { fastify };

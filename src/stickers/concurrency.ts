@@ -1,11 +1,11 @@
-import env from '../config/env';
+import { runtimeConfig } from '../config/runtime-config';
 
 // Pembatas konkurensi per user untuk job berat (video). In-memory saja:
 // slot yang sedang berjalan tidak perlu selamat dari restart.
 export class PerUserConcurrency {
   private readonly running = new Map<string, number>();
 
-  constructor(private readonly max: number = env.videoConcurrencyPerUser) {}
+  constructor(private readonly max: number = runtimeConfig.get().videoConcurrencyPerUser) {}
 
   tryAcquire(key: string): boolean {
     const current = this.running.get(key) ?? 0;

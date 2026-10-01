@@ -1,4 +1,5 @@
 import Sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { StickerGenerator, GeneratorInput, GeneratorContext } from './types';
 import { ProcessingResult } from '../result';
 import { AppError } from '../../errors/app-error';
@@ -77,7 +78,7 @@ export class CaptionGenerator implements StickerGenerator {
       let finalSharp: Sharp.Sharp;
 
       if (position === 'top') {
-        const resizedImage = await Sharp(filePath)
+        const resizedImage = await Sharp(filePath, sharpInputOptions())
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
@@ -95,7 +96,7 @@ export class CaptionGenerator implements StickerGenerator {
           { input: resizedImage, top: bannerHeight, left: 0 },
         ]);
       } else if (position === 'overlay') {
-        const resizedImage = await Sharp(filePath)
+        const resizedImage = await Sharp(filePath, sharpInputOptions())
           .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
@@ -106,7 +107,7 @@ export class CaptionGenerator implements StickerGenerator {
         ]);
       } else {
         // default: bottom
-        const resizedImage = await Sharp(filePath)
+        const resizedImage = await Sharp(filePath, sharpInputOptions())
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 

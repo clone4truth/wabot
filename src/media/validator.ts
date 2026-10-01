@@ -9,22 +9,32 @@ const MIME_SIGNATURES: Record<string, Buffer> = {
   'image/webp': Buffer.from([0x52, 0x49, 0x46, 0x46]),
 };
 
+// Cukup 12 byte untuk semua signature di bawah (magic PNG 8 byte, box 'ftyp' 4-8).
+const MAGIC_PROBE_BYTES = 12;
+
 export async function validateMediaFile(
   filePath: string,
   expectedMimeTypes: string[]
 ): Promise<{ valid: boolean; detectedMime?: string }> {
+  let handle: fs.promises.FileHandle | undefined;
   try {
-    const buffer = await fs.promises.readFile(filePath);
+    // Baca HANYA 12 byte. `readFile` di sini akan menarik seluruh file (sampai
+    // 20 MB) ke heap padahal yang dicek cuma 8 byte magic — dikalikan 4 slot
+    // image yang sedang jalan, itu ~80 MB sia-sia.
+    handle = await fs.promises.open(filePath, 'r');
+    const probe = Buffer.alloc(MAGIC_PROBE_BYTES);
+    const { bytesRead } = await handle.read(probe, 0, MAGIC_PROBE_BYTES, 0);
+
     for (const mime of expectedMimeTypes) {
       if (mime === 'video/mp4') {
         // Box 'ftyp' MP4 ada di offset 4, bukan 0.
-        if (buffer.length > 8 && buffer.slice(4, 8).toString() === 'ftyp') {
+        if (bytesRead > 8 && probe.subarray(4, 8).toString() === 'ftyp') {
           return { valid: true, detectedMime: mime };
         }
         continue;
       }
       const sig = MIME_SIGNATURES[mime];
-      if (sig && buffer.slice(0, sig.length).equals(sig)) {
+      if (sig && bytesRead >= sig.length && probe.subarray(0, sig.length).equals(sig)) {
         return { valid: true, detectedMime: mime };
       }
     }
@@ -32,6 +42,9 @@ export async function validateMediaFile(
   } catch (err) {
     logger.warn('Media validation failed', { error: String(err) });
     return { valid: false };
+  } finally {
+    // File descriptor harus selalu ditutup, termasuk saat throw.
+    await handle?.close().catch(() => {});
   }
 }
 
@@ -46,7 +59,9 @@ export function validateFileSize(filePath: string, maxBytes: number): boolean {
 
 export async function validateImageContent(filePath: string): Promise<boolean> {
   try {
-    const metadata = await Sharp(filePath).metadata();
+    // `.metadata()` hanya membaca header. Batas piksel sesungguhnya ditegakkan
+    // di call site decode (sharpInputOptions).
+    const metadata = await Sharp(filePath, { limitInputPixels: env.maxInputPixels }).metadata();
     return metadata.width !== undefined && metadata.height !== undefined;
   } catch {
     return false;

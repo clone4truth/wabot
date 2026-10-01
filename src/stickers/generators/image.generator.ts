@@ -22,6 +22,9 @@ export class ImageGenerator implements StickerGenerator {
   async process(input: GeneratorInput): Promise<ProcessingResult> {
     const mediaUrl = input.mediaUrl ?? (input.content?.mediaUrl as string);
     const modifier = input.modifier ?? 'full';
-    return this.processor.process(mediaUrl, modifier);
+    // Teruskan deadline ke processor. Tanpa ini, `!stiker` pada media yang
+    // stalling akan menahan slot JobManager tanpa batas (JobManager hanya
+    // melepas slot di .finally(), tidak pernah force-reject).
+    return this.processor.process(mediaUrl, modifier, input.timeoutMs, input.signal);
   }
 }

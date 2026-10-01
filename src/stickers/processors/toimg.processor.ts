@@ -1,4 +1,5 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { ImageResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
@@ -7,7 +8,7 @@ export class ToImageProcessor {
   async process(stickerBuffer: Buffer, isAnimated?: boolean): Promise<ImageResult> {
     let meta;
     try {
-      meta = await Sharp(stickerBuffer).metadata();
+      meta = await sharp(stickerBuffer, sharpInputOptions()).metadata();
     } catch {
       throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format media tidak didukung atau rusak');
     }
@@ -31,12 +32,12 @@ export class ToImageProcessor {
 
     let pngBuffer: Buffer;
     try {
-      pngBuffer = await Sharp(stickerBuffer).png().toBuffer();
+      pngBuffer = await sharp(stickerBuffer, sharpInputOptions()).png().toBuffer();
     } catch {
       throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Gagal mengonversi sticker ke gambar');
     }
 
-    const pngMeta = await Sharp(pngBuffer).metadata().catch(() => null);
+    const pngMeta = await sharp(pngBuffer).metadata().catch(() => null);
 
     return {
       buffer: pngBuffer,

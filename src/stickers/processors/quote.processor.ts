@@ -1,4 +1,5 @@
-import Sharp from 'sharp';
+import sharp from 'sharp';
+import { sharpInputOptions } from '../../media/sharp-runtime';
 import { renderFittedText } from '../rendering/text-layout';
 import { StickerResult } from '../result';
 import { validateText } from '../rendering/text-utils';
@@ -24,11 +25,11 @@ export class QuoteProcessor {
       align: 'center',
     });
 
-    const webpBuffer = await Sharp(buffer)
+    const webpBuffer = await sharp(buffer, sharpInputOptions())
       .webp({ quality: 90, preset: 'text' })
       .toBuffer();
 
-    const meta = await Sharp(webpBuffer).metadata();
+    const meta = await sharp(webpBuffer).metadata();
 
     return {
       buffer: webpBuffer,

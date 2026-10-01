@@ -12,6 +12,7 @@ interface Entry {
 // Single-process: aman untuk 1 replika (sesuai arsitektur V1).
 const registry = new Set<JsonFileStore>();
 let signalsHooked = false;
+const PRUNE_INTERVAL_MS = 60_000;
 
 function hookSignals(): void {
   if (signalsHooked) return;
@@ -37,6 +38,7 @@ export class JsonFileStore {
   private data = new Map<string, Entry>();
   private readonly filePath: string;
   private saveTimer?: NodeJS.Timeout;
+  private readonly pruneTimer: NodeJS.Timeout;
 
   constructor(
     dir: string,
@@ -48,6 +50,10 @@ export class JsonFileStore {
     this.load();
     registry.add(this);
     hookSignals();
+    // `prune()` ada sejak lama tapi TIDAK PERNAH dipanggil — entri kedaluwarsa
+    // menumpuk selamanya. Sekarang disapu berkala.
+    this.pruneTimer = setInterval(() => this.prune(), PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
   }
 
   get(key: string): unknown | undefined {
@@ -88,6 +94,22 @@ export class JsonFileStore {
       }
     }
     if (removed) this.scheduleSave();
+  }
+
+  /**
+   * Lepas semua handle: timer, dan lepas dari `registry` (yang selama ini tidak
+   * pernah punya jalur penghapusan, sehingga instance-nya — beserta seluruh
+   * `data` Map-nya — tertahan selama proses).
+   */
+  close(): void {
+    clearInterval(this.pruneTimer);
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+    }
+    registry.delete(this);
+    this.flush();
+    this.data.clear();
   }
 
   flush(): void {
