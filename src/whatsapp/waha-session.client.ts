@@ -100,14 +100,14 @@ export class WahaSessionClient {
   }
 
   async getQr(): Promise<{ dataUrl: string }> {
-    const qr = await this.request<{ base64?: unknown; mimetype?: unknown }>(
+    const qr = await this.request<{ data?: unknown; mimetype?: unknown }>(
       `/api/${encodeURIComponent(this.session)}/auth/qr`,
     );
-    if (!qr || typeof qr.base64 !== 'string' || !qr.base64 ||
-        !/^[A-Za-z0-9+/]+={0,2}$/.test(qr.base64) ||
-        !Buffer.from(qr.base64, 'base64').subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
+    if (!qr || qr.mimetype !== 'image/png' || typeof qr.data !== 'string' || !qr.data ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(qr.data) ||
+        !Buffer.from(qr.data, 'base64').subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
       throw new WahaSessionError('QR dari WAHA tidak valid. Coba perbarui QR.');
     }
-    return { dataUrl: `data:image/png;base64,${qr.base64}` };
+    return { dataUrl: `data:image/png;base64,${qr.data}` };
   }
 }

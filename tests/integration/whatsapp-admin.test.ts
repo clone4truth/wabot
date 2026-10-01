@@ -37,7 +37,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
         return;
       }
       if (req.url === '/api/default/auth/qr') {
-        res.end(JSON.stringify({ base64: qr, mimetype: 'image/png' }));
+        res.end(JSON.stringify({ data: qr, mimetype: 'image/png' }));
         return;
       }
       if (req.method === 'GET') {
@@ -143,7 +143,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
     expect(calls.at(-1)?.url).toBe('/api/sessions/default/restart');
   });
 
-  it('fetches a PNG QR using Accept application/json and disables caching', async () => {
+  it('reads the documented QR data field using Accept application/json and disables browser caching', async () => {
     status = 'SCAN_QR_CODE';
     const response = await get('/qr');
     expect(response.statusCode).toBe(200);
