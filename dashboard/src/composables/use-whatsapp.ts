@@ -1,8 +1,8 @@
-import { userMessage } from '@/lib/presentation'
+import { userMessage } from '../lib/presentation'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { api, ApiError, type WhatsappAction } from '@/lib/api'
-import { usePolling } from '@/composables/use-polling'
+import { api, ApiError, type WhatsappAction } from '../lib/api'
+import { usePolling } from './use-polling'
 
 export function useWhatsapp() {
   const busy = ref<WhatsappAction | null>(null)
@@ -21,8 +21,8 @@ export function useWhatsapp() {
       }
     }
     return { session, qr, qrError }
-  }, { intervalMs: 3_000 })
-  poll.start()
+  }, { intervalMs: 15_000 })
+  // Manual refresh only: never start the polling loop or request on mount.
 
   async function perform(action: WhatsappAction) {
     if (busy.value) return
@@ -31,25 +31,27 @@ export function useWhatsapp() {
     poll.stop()
     // Never show a QR from before a restart or logout.
     poll.data.value = null
+    poll.error.value = null
     try {
       await api.whatsappAction(action)
       const messages = {
+        start: 'Sesi WhatsApp mulai dihubungkan',
         connect: 'Koneksi WhatsApp mulai dihubungkan',
         restart: 'Koneksi WhatsApp dimulai ulang',
         stop: 'Koneksi WhatsApp dihentikan',
         logout: 'Keluar dari WhatsApp. Pindai QR untuk menautkan kembali.',
       }
       toast.success(messages[action])
+      await poll.refresh()
     } catch (error) {
       actionError.value = userMessage(error, 'Koneksi belum dapat diubah. Coba lagi.')
     } finally {
       busy.value = null
-      poll.start()
     }
   }
 
   return {
-    ...poll,
+    loading: poll.loading, error: poll.error, updatedAt: poll.updatedAt, refresh: poll.refresh,
     session: computed(() => poll.data.value?.session ?? null),
     qr: computed(() => poll.error.value ? null : poll.data.value?.qr ?? null),
     qrError: computed(() => poll.data.value?.qrError ?? null),

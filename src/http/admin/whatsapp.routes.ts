@@ -2,6 +2,35 @@ import { FastifyInstance } from 'fastify';
 import env from '../../config/env';
 import { WahaSessionClient, WahaSessionError } from '../../whatsapp/waha-session.client';
 
+const READ_CACHE_MS = 15_000;
+const ACTION_COOLDOWN_MS = 15_000;
+
+/** Share one upstream request, including failures, without background timers. */
+function cachedRead<T>(load: () => Promise<T>) {
+  let cached: Promise<T> | undefined;
+  let settled = false;
+  let expiresAt = 0;
+  return {
+    read(): Promise<T> {
+      if (cached && (!settled || Date.now() < expiresAt)) return cached;
+      const pending = load();
+      cached = pending;
+      settled = false;
+      const complete = () => {
+        if (cached !== pending) return;
+        settled = true;
+        expiresAt = Date.now() + READ_CACHE_MS;
+      };
+      pending.then(complete, complete);
+      return pending;
+    },
+    clear(): void {
+      cached = undefined;
+      expiresAt = 0;
+    },
+  };
+}
+
 function webhookConfigured(): boolean {
   try {
     const url = new URL(env.wahaBotWebhookUrl);
@@ -14,6 +43,10 @@ function webhookConfigured(): boolean {
 /** Register inside the authenticated admin scope only. */
 export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<void> {
   const waha = new WahaSessionClient();
+  const sessionRead = cachedRead(() => waha.getSession());
+  const qrRead = cachedRead(() => waha.getQr());
+  // Only the four whitelisted actions can enter this map.
+  const nextActionAt = new Map<string, number>();
   let mutating = false;
 
   secure.addHook('onSend', async (_request, reply, payload) => {
@@ -34,7 +67,7 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
   });
 
   secure.get('/api/admin/whatsapp', async () => {
-    const session = await waha.getSession();
+    const session = await sessionRead.read();
     // Explicit projection: never return session.config (HMAC, proxy, headers).
     return {
       name: waha.session,
@@ -47,25 +80,31 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
   });
 
   secure.get('/api/admin/whatsapp/qr', async (_request, reply) => {
-    const session = await waha.getSession();
+    const session = await sessionRead.read();
     if (session?.status !== 'SCAN_QR_CODE') {
       return reply.code(409).send({ error: 'QR belum tersedia. Tunggu sesi siap dipindai.' });
     }
-    return waha.getQr();
+    return qrRead.read();
   });
 
   secure.post<{ Params: { action: string } }>('/api/admin/whatsapp/:action', async (request, reply) => {
-    const { action } = request.params;
-    if (!['connect', 'stop', 'restart', 'logout'].includes(action)) {
+    const action = request.params.action === 'connect' ? 'start' : request.params.action;
+    if (!['start', 'stop', 'restart', 'logout'].includes(action)) {
       return reply.code(400).send({ error: 'Operasi WhatsApp tidak dikenal.' });
     }
     if (mutating) {
       return reply.code(409).send({ error: 'Operasi sesi sedang berjalan. Tunggu sebentar.' });
     }
+    if (Date.now() < (nextActionAt.get(action) ?? 0)) {
+      reply.header('Retry-After', Math.ceil(((nextActionAt.get(action) ?? 0) - Date.now()) / 1000));
+      return reply.code(429).send({ error: 'Tunggu sebentar sebelum mengulangi operasi ini.' });
+    }
+    nextActionAt.set(action, Date.now() + ACTION_COOLDOWN_MS);
     mutating = true;
     try {
-      const session = await waha.getSession();
-      if (action === 'connect') {
+      const session = await sessionRead.read();
+      let changed = false;
+      if (action === 'start') {
         if (!session) {
           if (!webhookConfigured()) {
             return reply.code(409).send({
@@ -73,15 +112,23 @@ export async function registerWhatsappRoutes(secure: FastifyInstance): Promise<v
             });
           }
           await waha.createSession(env.wahaBotWebhookUrl);
+          changed = true;
         } else if (session.status === 'STOPPED') {
           await waha.action('start');
+          changed = true;
         } else if (session.status === 'FAILED') {
           await waha.action('restart');
+          changed = true;
         }
         // STARTING / SCAN_QR_CODE / WORKING: already connecting or connected.
       } else {
         if (!session) return reply.code(409).send({ error: 'Sesi belum dibuat. Hubungkan WhatsApp terlebih dahulu.' });
         await waha.action(action as 'stop' | 'restart' | 'logout');
+        changed = true;
+      }
+      if (changed) {
+        sessionRead.clear();
+        qrRead.clear();
       }
       return { ok: true };
     } finally {

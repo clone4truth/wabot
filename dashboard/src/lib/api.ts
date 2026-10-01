@@ -190,7 +190,7 @@ export interface WhatsappSession {
   webhookConfigured: boolean
 }
 
-export type WhatsappAction = 'connect' | 'stop' | 'restart' | 'logout'
+export type WhatsappAction = 'start' | 'connect' | 'stop' | 'restart' | 'logout'
 
 // ---- Endpoints ----
 

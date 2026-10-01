@@ -25,7 +25,8 @@ Semua endpoint berikut memerlukan cookie admin dan mengembalikan `no-store`:
 |---|---|---|
 | GET | `/api/admin/whatsapp` | Status sesi yang dikonfigurasi server; 404 upstream menjadi MISSING |
 | GET | `/api/admin/whatsapp/qr` | PNG data URL ketika SCAN_QR_CODE; selain itu 409 |
-| POST | `/api/admin/whatsapp/connect` | Create jika belum ada, start STOPPED, restart FAILED; idempotent untuk sesi berjalan |
+| POST | `/api/admin/whatsapp/start` | Tombol Mulai sesi: create jika belum ada, start STOPPED, restart FAILED; idempotent untuk sesi berjalan |
+| POST | `/api/admin/whatsapp/connect` | Alias kompatibilitas untuk `/start` |
 | POST | `/api/admin/whatsapp/restart` | Restart sesi WAHA |
 | POST | `/api/admin/whatsapp/stop` | Stop tanpa menghapus autentikasi |
 | POST | `/api/admin/whatsapp/logout` | Menghapus autentikasi; tidak menghapus konfigurasi sesi |
@@ -35,6 +36,23 @@ mentah tidak diproyeksikan. Error upstream tidak dipantulkan mentah. `502` menan
 kegagalan WAHA, `401` menandai login admin invalid, dan `409` menandai sesi/state
 atau operasi yang belum siap. Pembuatan sesi baru memerlukan
 `WAHA_BOT_WEBHOOK_URL`, dengan kunci HMAC diambil dari environment backend.
+
+## Pembatasan request WAHA
+
+Halaman WhatsApp dan ringkasan tidak menjalankan polling WAHA atau meminta status
+saat mount. Mulai sesi dan Perbarui adalah aksi manual. Sesudah aksi sesi berhasil,
+dashboard membaca status sekali dan mengambil QR hanya jika SCAN_QR_CODE. Jika sesi
+masih STARTING, QR kedaluwarsa, atau akun selesai dipindai, pengguna memilih Perbarui.
+Navigasi ke tab lain, error, dan idle tidak memulai request baru secara otomatis.
+
+Backend berbagi satu request status yang masih berjalan, lalu menyimpan hasil atau
+kegagalan selama 15 detik. QR memakai aturan yang sama dan menggunakan pemeriksaan
+status bersama, sehingga 20 refresh QR serentak cukup dengan satu pemeriksaan sesi
+dan satu pengambilan QR. Cache hanya dibaca saat ada request; tidak ada timer
+background. Mutasi sesi yang berhasil menghapus kedua cache agar QR lama tidak
+dipakai kembali. Operasi identik dari beberapa tab dibatasi 15 detik dengan 429
+dan Retry-After; `/connect` berbagi batas yang sama dengan `/start`. Aksi lain,
+seperti stop setelah start, tetap dapat dijalankan.
 
 ## Verifikasi
 

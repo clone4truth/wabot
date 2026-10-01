@@ -17,7 +17,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFoo
 const { session, qr, qrError, loading, error, updatedAt, busy, actionError, refresh, perform } = useWhatsapp()
 const status = computed(() => whatsappStatus(session.value?.status))
 const connected = computed(() => session.value?.status === 'WORKING')
-const canConnect = computed(() => session.value && ['MISSING', 'STOPPED', 'FAILED'].includes(session.value.status))
+const canStart = computed(() => !session.value || ['MISSING', 'STOPPED', 'FAILED'].includes(session.value.status))
 const confirmAction = ref<'stop' | 'logout' | null>(null)
 const dialogOpen = computed({ get: () => confirmAction.value !== null, set: (open: boolean) => { if (!open) confirmAction.value = null } })
 
@@ -55,7 +55,7 @@ function run(action: WhatsappAction) {
           <CardDescription>{{ status.description }}</CardDescription>
         </CardHeader>
         <CardContent class="space-y-6">
-          <Skeleton v-if="!session && !error" class="mx-auto size-64 max-w-full" />
+          <Skeleton v-if="loading && !session" class="mx-auto size-64 max-w-full" />
           <div v-else-if="connected" class="flex flex-col items-center gap-4 rounded-lg bg-muted/50 px-5 py-10 text-center">
             <div class="grid size-14 place-items-center rounded-full bg-primary/10 text-primary"><CheckCircle2 class="size-7" /></div>
             <div class="space-y-1">
@@ -70,7 +70,7 @@ function run(action: WhatsappAction) {
               <Skeleton v-else class="size-full" />
             </div>
             <p v-if="qrError" class="text-sm text-destructive" role="alert">{{ qrError }}</p>
-            <p v-else class="text-sm text-muted-foreground">QR diperbarui otomatis selama menunggu pemindaian.</p>
+            <p v-else class="text-sm text-muted-foreground">Setelah memindai QR, klik Perbarui untuk memeriksa koneksi. Jika QR kedaluwarsa, klik Perbarui untuk mengambil kode baru.</p>
           </div>
           <div v-else class="flex flex-col items-center gap-4 rounded-lg bg-muted/50 px-5 py-10 text-center">
             <QrCode class="size-12 text-muted-foreground" />
@@ -78,8 +78,8 @@ function run(action: WhatsappAction) {
               <h2 class="text-lg font-semibold">{{ session?.status === 'STARTING' ? 'Menyiapkan koneksi…' : status.label }}</h2>
               <p class="text-sm leading-relaxed text-muted-foreground">{{ status.description }}</p>
             </div>
-            <Button v-if="canConnect" :disabled="!!busy || !!error || (session?.status === 'MISSING' && !session.webhookConfigured)" @click="run('connect')">
-              <Smartphone class="size-4" /> Hubungkan WhatsApp
+            <Button v-if="canStart" :disabled="loading || !!busy || (session?.status === 'MISSING' && !session.webhookConfigured)" @click="run('start')">
+              <Smartphone class="size-4" /> {{ busy === 'start' ? 'Memulai sesi…' : 'Mulai sesi' }}
             </Button>
           </div>
           <Alert v-if="session?.status === 'MISSING' && !session.webhookConfigured">
@@ -98,9 +98,9 @@ function run(action: WhatsappAction) {
           <CardHeader><CardTitle class="text-base">Cara menautkan perangkat</CardTitle><CardDescription>Gunakan aplikasi WhatsApp di ponsel Anda.</CardDescription></CardHeader>
           <CardContent>
             <ol class="space-y-5 text-sm leading-relaxed">
-              <li class="flex gap-3"><Badge variant="secondary" class="size-6 shrink-0 justify-center">1</Badge><span>Klik <strong>Hubungkan WhatsApp</strong> dan tunggu QR muncul.</span></li>
+              <li class="flex gap-3"><Badge variant="secondary" class="size-6 shrink-0 justify-center">1</Badge><span>Klik <strong>Mulai sesi</strong>. Jika koneksi masih disiapkan, tunggu sebentar lalu klik <strong>Perbarui</strong> untuk melihat QR.</span></li>
               <li class="flex gap-3"><Badge variant="secondary" class="size-6 shrink-0 justify-center">2</Badge><span>Buka WhatsApp → <strong>Perangkat tertaut</strong> → <strong>Tautkan perangkat</strong>.</span></li>
-              <li class="flex gap-3"><Badge variant="secondary" class="size-6 shrink-0 justify-center">3</Badge><span>Pindai QR di dashboard ini. Status berubah menjadi <strong>Terhubung</strong> setelah penautan selesai.</span></li>
+              <li class="flex gap-3"><Badge variant="secondary" class="size-6 shrink-0 justify-center">3</Badge><span>Pindai QR di dashboard ini, lalu klik <strong>Perbarui</strong> untuk memastikan status <strong>Terhubung</strong>.</span></li>
             </ol>
           </CardContent>
         </Card>

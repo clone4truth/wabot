@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { ArrowUpRight, MessageCircle } from '@lucide/vue'
+import { ArrowUpRight, MessageCircle, RefreshCw } from '@lucide/vue'
 import { api } from '@/lib/api'
 import { whatsappStatus } from '@/lib/whatsapp'
 import { usePolling } from '@/composables/use-polling'
@@ -9,8 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-const { data, error, loading, start } = usePolling(api.whatsapp, { intervalMs: 10_000 })
-start()
+const { data, error, loading, refresh } = usePolling(api.whatsapp, { intervalMs: 15_000 })
 const status = computed(() => whatsappStatus(data.value?.status))
 </script>
 
@@ -28,7 +27,10 @@ const status = computed(() => whatsappStatus(data.value?.status))
           <p class="max-w-prose text-sm text-muted-foreground">{{ error || status.description }}</p>
         </div>
       </div>
-      <Button as-child variant="outline" size="sm"><RouterLink to="/whatsapp">Kelola koneksi <ArrowUpRight class="size-4" /></RouterLink></Button>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" :disabled="loading" @click="refresh"><RefreshCw class="size-4" :class="{ 'animate-spin': loading }" /> Perbarui</Button>
+        <Button as-child variant="outline" size="sm"><RouterLink to="/whatsapp">Kelola koneksi <ArrowUpRight class="size-4" /></RouterLink></Button>
+      </div>
     </CardContent>
   </Card>
 </template>

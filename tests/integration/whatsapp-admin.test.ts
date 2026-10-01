@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -20,9 +20,11 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   let status: string | null;
   let failStatus = 0;
   let qr = QR;
+  let now = Date.now();
   const calls: Array<{ method?: string; url?: string; body: any; key?: string; accept?: string }> = [];
 
   beforeAll(async () => {
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
     saved = { ...env };
     upstream = http.createServer(async (req, res) => {
       let text = '';
@@ -64,6 +66,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   });
 
   beforeEach(() => {
+    now += 16_000;
     status = 'STOPPED';
     failStatus = 0;
     qr = QR;
@@ -76,13 +79,14 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
     upstream.closeAllConnections();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
     Object.assign(env, saved);
+    vi.restoreAllMocks();
   });
 
   const get = (path = '') => app.inject({ method: 'GET', url: `/api/admin/whatsapp${path}`, headers: { cookie } });
   const action = (name: string) => app.inject({ method: 'POST', url: `/api/admin/whatsapp/${name}`, headers: { cookie } });
 
   it('requires admin authentication for status, QR and every mutation', async () => {
-    for (const path of ['', '/qr', '/connect', '/restart', '/stop', '/logout']) {
+    for (const path of ['', '/qr', '/start', '/connect', '/restart', '/stop', '/logout']) {
       const response = await app.inject({ method: ['', '/qr'].includes(path) ? 'GET' : 'POST', url: `/api/admin/whatsapp${path}` });
       expect(response.statusCode).toBe(401);
     }
@@ -112,6 +116,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   it('does not create a session without a valid webhook URL', async () => {
     status = null;
     for (const url of ['', 'file:///tmp/private', 'https://user:password@example.com/webhooks']) {
+      now += 16_000;
       env.wahaBotWebhookUrl = url;
       expect((await action('connect')).statusCode).toBe(409);
     }
@@ -119,12 +124,13 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   });
 
   it('starts a stopped session without overwriting its existing configuration', async () => {
-    expect((await action('connect')).statusCode).toBe(200);
+    expect((await action('start')).statusCode).toBe(200);
     expect(calls.at(-1)).toMatchObject({ method: 'POST', url: '/api/sessions/default/start', body: null });
   });
 
   it('connect is idempotent for starting, scanning and connected sessions', async () => {
     for (const value of ['STARTING', 'SCAN_QR_CODE', 'WORKING', 'PASSKEY_REQUIRED']) {
+      now += 16_000;
       status = value;
       expect((await action('connect')).statusCode).toBe(200);
     }
@@ -148,6 +154,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
 
   it('does not fetch a QR until the session is ready for scanning', async () => {
     for (const value of ['STARTING', 'WORKING', 'STOPPED', 'PASSKEY_REQUIRED']) {
+      now += 16_000;
       status = value;
       expect((await get('/qr')).statusCode).toBe(409);
     }
@@ -157,6 +164,7 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
   it('rejects malformed or non-PNG QR payloads', async () => {
     status = 'SCAN_QR_CODE';
     for (const value of ['', '<script>', Buffer.from('<svg/>').toString('base64')]) {
+      now += 16_000;
       qr = value;
       expect((await get('/qr')).statusCode).toBe(502);
     }
@@ -202,5 +210,60 @@ describe('WhatsApp dashboard against a local WAHA HTTP simulator', () => {
       slow.closeAllConnections();
       await new Promise<void>(resolve => slow.close(() => resolve()));
     }
+  });
+
+  it('coalesces concurrent status checks and reuses the result for 15 seconds', async () => {
+    const responses = await Promise.all(Array.from({ length: 20 }, () => get()));
+    expect(responses.every(response => response.statusCode === 200)).toBe(true);
+    expect(calls).toHaveLength(1);
+    await get();
+    expect(calls).toHaveLength(1);
+    now += 16_000;
+    await get();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('shares the session check and QR fetch across concurrent refreshes', async () => {
+    status = 'SCAN_QR_CODE';
+    await get();
+    const responses = await Promise.all(Array.from({ length: 20 }, () => get('/qr')));
+    expect(responses.every(response => response.statusCode === 200)).toBe(true);
+    expect(calls.filter(call => call.url === '/api/sessions/default')).toHaveLength(1);
+    expect(calls.filter(call => call.url === '/api/default/auth/qr')).toHaveLength(1);
+  });
+
+  it('backs off upstream errors rather than retrying on every dashboard request', async () => {
+    failStatus = 503;
+    const responses = await Promise.all(Array.from({ length: 20 }, () => get()));
+    expect(responses.every(response => response.statusCode === 502)).toBe(true);
+    expect(calls).toHaveLength(1);
+    await get();
+    expect(calls).toHaveLength(1);
+    now += 16_000;
+    await get();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('invalidates status and QR after a session mutation', async () => {
+    status = 'SCAN_QR_CODE';
+    await get('/qr');
+    expect((await action('stop')).statusCode).toBe(200);
+    expect((await get()).json().status).toBe('STOPPED');
+    expect((await get('/qr')).statusCode).toBe(409);
+    expect((await action('start')).statusCode).toBe(200);
+    expect((await get('/qr')).statusCode).toBe(200);
+    expect(calls.filter(call => call.url === '/api/default/auth/qr')).toHaveLength(2);
+  });
+
+  it('throttles repeated activation including the legacy connect alias, while allowing stop', async () => {
+    expect((await action('start')).statusCode).toBe(200);
+    const count = calls.length;
+    const repeated = await action('connect');
+    expect(repeated.statusCode).toBe(429);
+    expect(repeated.headers['retry-after']).toBe('15');
+    expect(calls).toHaveLength(count);
+    expect((await action('stop')).statusCode).toBe(200);
+    now += 16_000;
+    expect((await action('start')).statusCode).toBe(200);
   });
 });
