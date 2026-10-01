@@ -1,6 +1,12 @@
 # .dockerignore
 node_modules
+dashboard/node_modules
 dist
+dashboard-dist
+.git
+.freebuff
+.start-dbg.sh
+data
 .env
 *.log
 sharp-*

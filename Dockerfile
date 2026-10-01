@@ -28,7 +28,7 @@ COPY dashboard/package*.json ./dashboard/
 RUN cd dashboard && npm ci
 
 COPY dashboard ./dashboard
-RUN cd dashboard && npm run build   # output -> /dashboard-dist
+RUN cd dashboard && npm run build   # output -> /app/dashboard-dist
 
 FROM node:22-alpine AS runtime
 
@@ -53,7 +53,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
-COPY --from=dashboard-builder /dashboard-dist ./dashboard-dist
+COPY --from=dashboard-builder /app/dashboard-dist ./dashboard-dist
 
 EXPOSE 3000
 

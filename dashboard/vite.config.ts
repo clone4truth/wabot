@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 
-// SPA di-build ke /dashboard-dist supaya Fastify bisa disajikan sebagai static
+// SPA di-build ke dashboard-dist di root repo supaya Fastify bisa menyajikannya sebagai static
 // file (satu container, satu reverse proxy).
 export default defineConfig({
   // WAJIB: Fastify menyajikan SPA di /dashboard. Tanpa base ini Vite menulis
