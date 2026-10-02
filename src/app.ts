@@ -27,6 +27,8 @@ fastify.addHook('preParsing', async (request, _reply, payload) => {
   return Readable.from(buf);
 });
 
+fastify.get('/', async (_request, reply) => reply.redirect('/dashboard/login'));
+
 fastify.post('/webhooks', { bodyLimit: 1_048_576 }, webhookController);
 fastify.get('/health', healthController);
 fastify.get('/ready', readyController);
