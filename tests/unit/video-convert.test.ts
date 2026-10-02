@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { VideoStickerProcessor } from '../../src/stickers/processors/video.processor';
 import { ToImageProcessor } from '../../src/stickers/processors/toimg.processor';
 import { ToGifProcessor } from '../../src/stickers/processors/togif.processor';
@@ -11,32 +12,15 @@ import { AppError } from '../../src/errors/app-error';
 import { ErrorCode } from '../../src/errors/error-codes';
 import env from '../../src/config/env';
 
-// Isolasi tempDir PER FILE test: test 'workspace bersih' di file ini (dan di
-// attp.test.ts) menghitung file 'togif-*'/'*.mp4' di env.tempDir. Worker vitest
-// lain (webhook, processor-deadline) menulis file serupa secara PARALEL di
-// tempDir bersama -> salah dihitung sebagai leak (flaky CI). env.tempDir dibaca
-// saat process() berjalan, jadi override di beforeAll cukup.
-let privateTempDir: string;
-let savedTempDir: string;
-
-beforeAll(() => {
-  privateTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vidconv-test-'));
-  savedTempDir = env.tempDir;
-  env.tempDir = privateTempDir;
-});
-
-afterAll(() => {
-  env.tempDir = savedTempDir;
-  fs.rmSync(privateTempDir, { recursive: true, force: true });
-});
-
 const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
 vi.mock('../../src/media/downloader', () => ({
   downloadMedia: dlMock.downloadMedia,
   resolveMediaUrl: (u: string) => u,
 }));
 
-const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vidfix-'));
+// setup-test-dirs.ts assigns an isolated TEMP_DIR before imports. Keep both
+// processor outputs and downloaded fixtures inside this suite's directories.
+const workdir = fs.mkdtempSync(path.join(env.tempDir, 'vidfix-'));
 const files: Record<string, string> = {};
 
 function serveAsTemp(name: string): string {
@@ -67,17 +51,32 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
   });
 
   it('video pendek -> webp animasi valid + temp dibersihkan', async () => {
-    const before = new Set(fs.readdirSync(os.tmpdir()));
-    const result = await new VideoStickerProcessor().process('http://x/short.mp4');
-    expect(result.mimetype).toBe('image/webp');
-    expect(result.animated).toBe(true);
-    const meta = await Sharp(result.buffer).metadata();
-    expect(meta.pages).toBeGreaterThan(1);
-    expect(meta.width).toBeLessThanOrEqual(512);
-    expect(meta.height).toBeLessThanOrEqual(512);
-    await new Promise((r) => setTimeout(r, 100));
-    const leaked = fs.readdirSync(os.tmpdir()).filter((f) => !before.has(f) && (f.endsWith('.mp4') || f.endsWith('.webp')));
-    expect(leaked).toEqual([]);
+    const beforeOutputs = fs.readdirSync(env.tempDir).sort();
+    const beforeFixtures = fs.readdirSync(workdir).sort();
+    const foreignFile = path.join(os.tmpdir(), `proc-dl-foreign-${randomUUID()}.mp4`);
+    dlMock.downloadMedia.mockImplementationOnce(async () => {
+      // Reproduce another worker creating an MP4 after the cleanup snapshot.
+      // This file must not count as a leak from this processor.
+      fs.writeFileSync(foreignFile, 'owned by another test');
+      const tmp = serveAsTemp('short.mp4');
+      return { filePath: tmp, mimeType: 'video/mp4', size: fs.statSync(tmp).size };
+    });
+    try {
+      const result = await new VideoStickerProcessor().process('http://x/short.mp4');
+      expect(result.mimetype).toBe('image/webp');
+      expect(result.animated).toBe(true);
+      const meta = await Sharp(result.buffer).metadata();
+      expect(meta.pages).toBeGreaterThan(1);
+      expect(meta.width).toBeLessThanOrEqual(512);
+      expect(meta.height).toBeLessThanOrEqual(512);
+      // Cleanup is synchronous: check both actual download and output folders
+      // immediately, without scanning the shared OS temp directory.
+      expect(fs.readdirSync(env.tempDir).sort()).toEqual(beforeOutputs);
+      expect(fs.readdirSync(workdir).sort()).toEqual(beforeFixtures);
+      expect(fs.existsSync(foreignFile)).toBe(true);
+    } finally {
+      fs.rmSync(foreignFile, { force: true });
+    }
   }, 60000);
 
   it('video portrait -> output <= 512x512', async () => {
@@ -90,7 +89,7 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
   it('video timeout -> PROCESSING_TIMEOUT + ffmpeg mati', async () => {
     const { convertVideoToAnimatedWebp } = await import('../../src/media/ffmpeg');
     const { execSync } = await import('child_process');
-    const out = `/tmp/timeout_${Date.now()}.webp`;
+    const out = path.join(env.tempDir, `timeout_${Date.now()}.webp`);
     const fs = await import('fs');
     try {
       await expect(
@@ -272,4 +271,3 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     }
   }, 120000);
 });
-

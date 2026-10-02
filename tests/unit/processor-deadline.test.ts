@@ -6,7 +6,7 @@
  * - Video: ffprobe tidak pernah melebihi sisa deadline; FFmpeg menerima sisa budget.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { execSync } from 'child_process';
 
 const ffmpegMocks = vi.hoisted(() => ({
@@ -41,8 +41,8 @@ vi.mock('../../src/media/downloader', () => ({
 
 import Sharp from 'sharp';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import env from '../../src/config/env';
 import { AttpProcessor } from '../../src/stickers/processors/attp.processor';
 import { ToGifProcessor } from '../../src/stickers/processors/togif.processor';
 import { VideoStickerProcessor } from '../../src/stickers/processors/video.processor';
@@ -57,7 +57,7 @@ let sampleMp4: Buffer;
 let fixtureDir: string;
 
 beforeAll(() => {
-  fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proc-fx-'));
+  fixtureDir = fs.mkdtempSync(path.join(env.tempDir, 'proc-fx-'));
   const webpPath = path.join(fixtureDir, 'anim.webp');
   const mp4Path = path.join(fixtureDir, 'out.mp4');
   execSync(
@@ -81,6 +81,10 @@ beforeAll(() => {
       fs.writeFileSync(outputPath, animatedWebp);
     },
   );
+});
+
+afterAll(() => {
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -171,7 +175,7 @@ describe('ToGif: FFmpeg + ffprobe receive remaining budget', () => {
 
 describe('Video: strict remaining budget (no deadline extension)', () => {
   function stubDownload(tag: string): string {
-    const tmp = path.join(os.tmpdir(), `proc-dl-${tag}-${Date.now()}.mp4`);
+    const tmp = path.join(fixtureDir, `proc-dl-${tag}-${Date.now()}.mp4`);
     fs.writeFileSync(tmp, Buffer.from('fake-video-bytes'));
     // Delay kecil agar elapsed > 0 → sisa budget terbukti menyusut (bukan budget penuh).
     mockedDownload.mockImplementation(async () => {
