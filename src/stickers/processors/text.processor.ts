@@ -12,13 +12,15 @@ export class TextStickerProcessor {
       text: clean,
       maxWidth: 512,
       maxHeight: 512,
+      maxFontSize: 144,
+      minFontSize: 18,
       color: '#ffffff',
       outlineColor: '#000000',
       outlineWidth: 2,
     });
 
     const webpBuffer = await Sharp(textBuffer)
-      .webp({ quality: 90, preset: 'text' })
+      .webp({ lossless: true, preset: 'text' })
       .toBuffer();
 
     const meta = await Sharp(webpBuffer).metadata();

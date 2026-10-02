@@ -9,7 +9,8 @@ import { ErrorCode } from '../../errors/error-codes';
 import { createTempFile, cleanupTempFile } from '../../media/temp-files';
 import { runFfmpegWithTimeout, FFMPEG_THREAD_ARGS } from '../../media/ffmpeg';
 import { logger } from '../../observability/logger';
-import { escapeXml, validateText, wrapWords } from '../rendering/text-utils';
+import { escapeXml, validateText } from '../rendering/text-utils';
+import { fitTextIntoRegionRendered } from '../rendering/text-layout';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
 
 import { defaultAnimationRegistry } from '../animations/registry';
@@ -56,7 +57,13 @@ export class AttpProcessor {
 
     // Hitung layout adaptif SATU KALI agar semua frame identik (tidak ada jitter/jumping).
     deadline.throwIfExpired();
-    const layout = await this.calculateStableLayout(clean, deadline);
+    let layout: AnimationLayout;
+    try {
+      layout = await this.calculateStableLayout(clean, deadline);
+    } catch (err) {
+      deadline.cleanup();
+      throw err;
+    }
 
     const workdir = path.join(env.tempDir, `attp-${randomUUID()}`);
     fs.mkdirSync(workdir, { recursive: true });
@@ -91,7 +98,7 @@ export class AttpProcessor {
         '-i', path.join(workdir, '%d.png'),
         '-c:v', 'libwebp',
         '-lossless', '0',
-        '-quality', '75',
+        '-quality', '90',
         '-loop', '0',
         '-an',
         outputPath,
@@ -135,41 +142,31 @@ export class AttpProcessor {
   }
 
   private async calculateStableLayout(text: string, deadline?: ReturnType<typeof createDeadline>): Promise<AnimationLayout> {
-    const maxWidth = 440;
-    const maxHeight = 400;
-
-    for (let fontSize = 56; fontSize >= 18; fontSize -= 4) {
-      if (deadline) deadline.throwIfExpired();
-      const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.62)));
-      const lines = wrapWords(text, maxChars);
-      const lh = Math.round(fontSize * 1.25);
-      const totalH = lines.length * lh;
-
-      if (totalH <= maxHeight) {
-        // Pastikan tidak ada baris yang terlalu lebar secara visual
-        const family = getFontFamily(getDefaultFontPath());
-        const texts = lines
-          .map((line, idx) => {
-            const y = idx * lh + Math.round(fontSize * 0.85);
-            return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff">${escapeXml(line)}</text>`;
-          })
-          .join('');
-        const testSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="${totalH + 20}" viewBox="0 0 512 ${totalH + 20}">${texts}</svg>`;
-        try {
-          const { info } = await Sharp(Buffer.from(testSvg)).trim().toBuffer({ resolveWithObject: true });
-          if (info.width <= maxWidth && info.height <= maxHeight) {
-            const startY = Math.max(20, Math.round((512 - totalH) / 2));
-            return { fontSize, lines, lh, startY };
-          }
-        } catch {
-          // Jika trim gagal, gunakan estimasi totalH
-          const startY = Math.max(20, Math.round((512 - totalH) / 2));
-          return { fontSize, lines, lh, startY };
-        }
-      }
-    }
-
-    // Jika bahkan pada 18px masih melebihi batas
-    throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks terlalu panjang untuk stiker animasi');
+    deadline?.throwIfExpired();
+    const family = getFontFamily(getDefaultFontPath());
+    // Reserve space for every built-in transform: zoom 1.12, slide ±30px,
+    // and bounce -32px. Measure the same outlined glyphs used in final frames.
+    const fitted = await fitTextIntoRegionRendered({
+      text,
+      width: 432,
+      height: 416,
+      maxFontSize: 112,
+      minFontSize: 18,
+      outlineWidth: 2,
+      renderLine: (lines, fontSize, lineHeight) => {
+        deadline?.throwIfExpired();
+        return lines.map((line, idx) => {
+          const y = idx * lineHeight + Math.round(fontSize * 0.85);
+          return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff" stroke="#000000" stroke-width="4" paint-order="stroke">${escapeXml(line)}</text>`;
+        }).join('');
+      },
+    });
+    deadline?.throwIfExpired();
+    return {
+      fontSize: fitted.fontSize,
+      lines: fitted.lines,
+      lh: fitted.lineHeight,
+      startY: Math.round((512 - fitted.totalHeight) / 2),
+    };
   }
 }

@@ -9,7 +9,8 @@ export interface CommandMetadata {
 export const COMMAND_REGISTRY: CommandMetadata[] = [
   // Sticker
   { name: 'stiker', description: 'Buat stiker dari foto, video, atau teks', usage: '!stiker', category: 'Sticker' },
-  { name: 'stiker full', aliases: ['full'], description: 'Stiker foto penuh tanpa crop (contain)', usage: '!stiker full', category: 'Sticker' },
+  { name: 'stiker full', aliases: ['full'], description: 'Stiker foto penuh; tepi transparan kosong dipangkas agar objek lebih besar', usage: '!stiker full', category: 'Sticker' },
+  { name: 'stiker trim', aliases: ['trim'], description: 'Pangkas margin latar seragam agar isi gambar lebih besar', usage: '!stiker trim', category: 'Sticker' },
   { name: 'stiker crop', aliases: ['crop'], description: 'Stiker foto kotak terpotong (cover)', usage: '!stiker crop', category: 'Sticker' },
   { name: 'stiker circle', aliases: ['circle'], description: 'Stiker foto bentuk lingkaran', usage: '!stiker circle', category: 'Sticker' },
   { name: 'stiker meme', aliases: ['meme'], description: 'Stiker foto meme teks atas dan bawah', usage: '!stiker meme <atas> | <bawah>', category: 'Sticker' },
@@ -30,6 +31,7 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   { name: 'stiker quote', description: 'Stiker kutipan berbingkai nama pengirim', usage: '!stiker quote <teks>', category: 'Text' },
   { name: 'stiker bubble', description: 'Stiker chat bubble mirip WhatsApp', usage: '!stiker bubble <teks>', category: 'Text' },
   { name: 'ttp', description: 'Teks ke gambar dengan gaya preset (gradient/dark/gold/terminal/neon/minimal)', usage: '!ttp <teks> atau !ttp style <preset> <teks>', category: 'Text' },
+  { name: 'ttp --image', description: 'Buat gambar PNG 1024×1024 dengan teks besar, bisa dibuka penuh', usage: '!ttp --image [style <preset>] <teks>', category: 'Text' },
 
   // Animation
   { name: 'attp', description: 'Teks animasi dengan efek (rainbow/fade/zoom/blink/slide/bounce)', usage: '!attp <teks> atau !attp effect <preset> <teks>', category: 'Animation' },

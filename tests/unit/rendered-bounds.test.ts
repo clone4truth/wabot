@@ -12,6 +12,7 @@ import { escapeXml } from '../../src/stickers/rendering/text-utils';
 import { fitTextIntoRegionRendered } from '../../src/stickers/rendering/text-layout';
 import { defaultTemplateRegistry } from '../../src/stickers/templates/registry';
 import { ErrorCode } from '../../src/errors/error-codes';
+import { getDefaultFontPath, getFontFamily } from '../../src/stickers/rendering/fonts';
 
 vi.mock('../../src/media/downloader', () => ({
   downloadMedia: vi.fn(async () => {
@@ -26,6 +27,40 @@ vi.mock('../../src/media/downloader', () => ({
 }));
 
 describe('fitTextIntoRegionRendered: actual pixel bounds', () => {
+  it('wraps wide glyphs using their full unclipped width', async () => {
+    const text = 'W'.repeat(12);
+    const fitted = await fitTextIntoRegionRendered({ text, width: 200, height: 200, maxFontSize: 30, minFontSize: 10 });
+    const family = getFontFamily(getDefaultFontPath());
+    const layers = fitted.lines.map((line, i) => `<text x="1024" y="${100 + i * fitted.lineHeight}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fitted.fontSize}" font-weight="bold" fill="white">${line}</text>`).join('');
+    const { info } = await Sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${layers}</svg>`)).trim().toBuffer({ resolveWithObject: true });
+    expect(info.width).toBeLessThanOrEqual(200);
+    expect(fitted.lines.join('')).toBe(text);
+    expect(fitted.fontSize).toBe(30);
+  });
+
+  it('measures a complete custom terminal prefix before accepting a layout', async () => {
+    const text = 'W'.repeat(24);
+    const renderLines = (lines: string[], size: number, lineHeight: number) => lines.map((line, i) => `<text x="40" y="${100 + i * lineHeight}" font-family="monospace" font-size="${size}" font-weight="bold" fill="white">${i === 0 ? 'user@wabot:~$ ' : '&gt; '}${line}</text>`).join('');
+    const fitted = await fitTextIntoRegionRendered({
+      text, width: 432, height: 340, maxFontSize: 22, minFontSize: 12,
+      fontFamily: 'monospace', renderLine: renderLines,
+    });
+    const { info } = await Sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${renderLines(fitted.lines, fitted.fontSize, fitted.lineHeight)}</svg>`)).trim().toBuffer({ resolveWithObject: true });
+    // Previously the 432px measurement viewport clipped this 503px line and
+    // reported only 391px, accepting a layout that lost the end of the text.
+    expect(info.width).toBeLessThanOrEqual(432);
+    expect(fitted.lines.length).toBeGreaterThan(1);
+    expect(fitted.lines.join('')).toBe(text);
+  });
+
+  it('honors caller wrapping capacity while preserving every grapheme', async () => {
+    const fitted = await fitTextIntoRegionRendered({
+      text: '🇮🇩🇯🇵🇰🇷🇺🇸', width: 432, height: 340,
+      maxFontSize: 28, minFontSize: 14, maxCharsPerLine: () => 2,
+    });
+    expect(fitted.lines).toEqual(['🇮🇩🇯🇵', '🇰🇷🇺🇸']);
+  });
+
   const CASES: Array<[string, string]> = [
     ['Latin', 'The quick brown fox jumps over the lazy dog repeatedly'],
     ['CJK', '你好世界你好世界'],

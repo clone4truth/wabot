@@ -9,6 +9,7 @@ import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
 import { BackgroundRemovalService, defaultBackgroundRemovalService } from '../background-removal/service';
 import { sharpInputOptions } from '../../media/sharp-runtime';
+import { fitVisibleImage } from '../rendering/visible-image';
 
 // Sisi terpanjang gambar analisis untuk smart-crop. Cukup presisi untuk
 // menentukan bounding box subjek, tapi hanya ~0.26 MP raw RGBA (1 MB).
@@ -86,12 +87,8 @@ export class RemoveBgGenerator implements StickerGenerator {
         finalBuffer = await this.processOutline(transparentPng, colorName);
       } else {
         // default: removebg
-        finalBuffer = await Sharp(transparentPng)
-          .resize(512, 512, {
-            fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .webp({ quality: 90 })
+        finalBuffer = await (await fitVisibleImage(transparentPng))
+          .webp({ quality: 95, smartSubsample: true })
           .toBuffer();
       }
 
@@ -191,8 +188,7 @@ export class RemoveBgGenerator implements StickerGenerator {
     const color = OUTLINE_COLORS[colorName.toLowerCase()] ?? OUTLINE_COLORS.white;
 
     // Resize subject to 480x480 inside 512x512 first to make room for outline
-    const fitted = await Sharp(transparentPng)
-      .resize(472, 472, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    const fitted = await (await fitVisibleImage(transparentPng, 472))
       .toBuffer();
 
     const fittedMeta = await Sharp(fitted).metadata();

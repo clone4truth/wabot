@@ -15,10 +15,14 @@ Bot WhatsApp modular untuk pembuatan dan konversi stiker tingkat lanjut mengguna
   - `!emoji` — Render emoji besar 1–4 grapheme cluster tanpa clipping/tofu.
   - `!badge` — Stiker badge status bergaya modern (`ONLINE`, `OFFLINE`, `LIVE`, `ERROR`, `SUCCESS`).
 - **Advanced TTP & ATTP**:
+  - Font adaptif lebih besar dengan pemeriksaan batas piksel agar tulisan tidak terpotong.
+  - `!ttp --image [style <preset>] <teks>` — Gambar PNG 1024×1024 yang dirender langsung pada resolusi penuh.
   - `!ttp style <preset> <teks>` — Preset: `gradient`, `minimal`, `dark`, `terminal`, `gold`, `neon`.
   - `!attp effect <preset> <teks>` — Animasi multi-frame WebP: `rainbow`, `fade`, `zoom`, `blink`, `slide`, `bounce`.
 - **In-Process Bounded Job Management**: Alokasi kuota konkurensi global (`MAX_IMAGE_JOBS`, `MAX_VIDEO_JOBS`, `MAX_ANIMATION_JOBS`, `MAX_BACKGROUND_JOBS`) dengan isolasi status per pengguna via `!job`.
 - **Konversi Media**:
+  - `!stiker` / `!stiker full` — Tepi transparan kosong dipangkas agar isi gambar lebih besar.
+  - `!stiker trim` — Pangkas margin putih/latar seragam pada gambar sebelum dibuat stiker.
   - `!toimg` — Konversi stiker statis ke gambar PNG.
   - `!togif` — Konversi stiker bergerak ke video MP4 H.264.
 - **Keamanan & Privasi**: HMAC webhook, exact-origin SSRF protection, bounded temp cleanup, rate limiting, and zero sensitive chat logging.

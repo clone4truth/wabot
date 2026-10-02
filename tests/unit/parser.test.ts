@@ -18,6 +18,10 @@ describe('Command Parser', () => {
     expect(result?.args).toBe('');
   });
 
+  it('parses !stiker trim as an image modifier', () => {
+    expect(parseCommand('!stiker trim')).toMatchObject({ name: 'stiker', modifier: 'trim', args: '' });
+  });
+
   it('parses !stiker teks as direct text', () => {
     const result = parseCommand('!stiker teks hello');
     expect(result?.modifier).toBe('teks');
@@ -156,6 +160,17 @@ describe('Command Parser', () => {
     expect(attpLiteral?.name).toBe('attp');
     expect(attpLiteral?.options).toBeUndefined();
     expect(attpLiteral?.args).toBe('fade Hello');
+  });
+
+  it('parses native PNG output with an optional TTP style and custom prefix', () => {
+    expect(parseCommand('!ttp --image Halo dunia')).toMatchObject({
+      name: 'ttp', args: 'Halo dunia', options: { output: 'image' },
+    });
+    expect(parseCommand('?ttp --IMAGE style gold Tulisan besar', '?')).toMatchObject({
+      name: 'ttp', args: 'Tulisan besar', options: { output: 'image', style: 'gold' },
+    });
+    expect(parseCommand('!ttp --image')?.args).toBe('');
+    expect(parseCommand('!ttp Halo --image dunia')?.args).toBe('Halo --image dunia');
   });
 
   it('parses !emoji and !badge commands', () => {

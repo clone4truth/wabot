@@ -93,6 +93,12 @@ describe('RemoveBgGenerator', () => {
     expect(result.mimetype).toBe('image/webp');
     expect(result.width).toBe(512);
     expect(result.height).toBe(512);
+    // The original subject spans only 80/200px. It should now fill the safe
+    // area rather than retain the removed background's empty padding.
+    const { info } = await Sharp(result.buffer).trim({ threshold: 10 })
+      .toBuffer({ resolveWithObject: true });
+    expect(info.width).toBeGreaterThan(450);
+    expect(info.height).toBeGreaterThan(450);
   });
 
   it('generates subject smart crop sticker centered at 512x512', async () => {

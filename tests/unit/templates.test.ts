@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { defaultTemplateRegistry } from '../../src/stickers/templates/registry';
 import { ErrorCode } from '../../src/errors/error-codes';
+import Sharp from 'sharp';
 
 describe('Sticker Templates', () => {
   it('semua built-in template terdaftar', () => {
@@ -33,6 +34,30 @@ describe('Sticker Templates', () => {
       expect(res.width).toBe(512);
       expect(res.height).toBe(512);
       expect(res.buffer.length).toBeGreaterThan(1000);
+    }
+  });
+
+  it('short template messages occupy a larger readable body area', async () => {
+    for (const name of ['terminal', 'breaking', 'wanted', 'minimal']) {
+      const result = await defaultTemplateRegistry.resolve(name).render({ text: 'Halo' });
+      const { data, info } = await Sharp(result.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const startY = name === 'terminal' ? 120 : name === 'breaking' ? 150 : name === 'wanted' ? 180 : 160;
+      const endY = name === 'terminal' ? 460 : name === 'breaking' ? 450 : 400;
+      let top = endY;
+      let bottom = -1;
+      for (let y = startY; y < endY; y++) {
+        for (let x = 40; x < 472; x++) {
+          const offset = (y * 512 + x) * info.channels;
+          const isBodyText = name === 'wanted'
+            ? data[offset] < 75 && data[offset + 1] < 60 && data[offset + 2] < 60
+            : data[offset] > 225 && data[offset + 1] > 225 && data[offset + 2] > 225;
+          if (isBodyText && data[offset + 3] > 0) {
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+      expect(bottom - top + 1).toBeGreaterThanOrEqual(name === 'terminal' ? 23 : 48);
     }
   });
 

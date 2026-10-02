@@ -8,6 +8,24 @@ async function pixels(buf: Buffer) {
   return { data, w: info.width, h: info.height, ch: info.channels };
 }
 
+async function inkBounds(buf: Buffer) {
+  const { data, w, h, ch } = await pixels(buf);
+  let left = w;
+  let right = -1;
+  let top = h;
+  let bottom = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * ch + ch - 1] === 0) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  return { left, right, top, bottom };
+}
+
 describe('Text outline (Pango stroke tak valid -> paint-order SVG)', () => {
   it('teks putih dikelilingi outline hitam', async () => {
     const buf = await renderTextToBuffer({ text: 'Hi', maxWidth: 512, maxHeight: 512, fontSize: 96 });
@@ -43,6 +61,58 @@ describe('Text outline (Pango stroke tak valid -> paint-order SVG)', () => {
 });
 
 describe('Adaptive fitted layout (ukur render aktual)', () => {
+  it('tries the minimum font even when the decrement would skip it', async () => {
+    const fitted = await renderFittedText({
+      text: 'WWWW', maxWidth: 225, maxHeight: 100,
+      maxFontSize: 53, minFontSize: 50, margin: 0,
+    });
+    expect(fitted.fontSize).toBe(50);
+  });
+
+  it('does not accept wide glyphs merely because the final SVG clipped them', async () => {
+    const fitted = await renderFittedText({
+      text: 'WWWW', maxWidth: 128, maxHeight: 128,
+      maxFontSize: 64, minFontSize: 16, margin: 0,
+    });
+    // A 64px WWWW layer is wider than 128px. Its clipped raster used to pass
+    // trim bounds when the safe area equalled the final canvas.
+    expect(fitted.fontSize).toBeLessThan(64);
+    const bounds = await inkBounds(fitted.buffer);
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(127);
+  });
+
+  it('keeps the complete outline inside margins for left, center and right alignment', async () => {
+    for (const align of ['left', 'center', 'right'] as const) {
+      const fitted = await renderFittedText({
+        text: 'WWWW', maxWidth: 160, maxHeight: 100,
+        maxFontSize: 56, minFontSize: 16, margin: 12,
+        outlineWidth: 8, align,
+      });
+      const bounds = await inkBounds(fitted.buffer);
+      expect(bounds.left).toBeGreaterThanOrEqual(12);
+      expect(bounds.right).toBeLessThan(148);
+      expect(bounds.top).toBeGreaterThanOrEqual(12);
+      expect(bounds.bottom).toBeLessThan(88);
+    }
+  });
+
+  it('renders a native 1024px PNG with the same logical fitted layout', async () => {
+    const options = { text: 'Baca jelas', maxWidth: 512, maxHeight: 512, margin: 16, maxFontSize: 128 };
+    const normal = await renderFittedText(options);
+    const large = await renderFittedText({ ...options, outputScale: 2 });
+    expect(large.fontSize).toBe(normal.fontSize);
+    const meta = await Sharp(large.buffer).metadata();
+    expect(meta.format).toBe('png');
+    expect(meta.width).toBe(1024);
+    expect(meta.height).toBe(1024);
+    const bounds = await inkBounds(large.buffer);
+    expect(bounds.left).toBeGreaterThanOrEqual(31);
+    expect(bounds.right).toBeLessThan(993);
+    expect(bounds.top).toBeGreaterThanOrEqual(31);
+    expect(bounds.bottom).toBeLessThan(993);
+  });
+
   it('calculateTextLayout: menghasilkan metrik layout deterministik tanpa rendering', () => {
     const layout = calculateTextLayout({
       text: 'Halo dunia stiker bot',

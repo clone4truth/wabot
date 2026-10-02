@@ -78,6 +78,20 @@ describe('TTP Style Presets & TtpGenerator', () => {
     expect(result.height).toBe(512);
   });
 
+  it('TtpGenerator returns a 1024px PNG for output image with a style preset', async () => {
+    const result = await generator.process(
+      { type: 'ttp', text: 'Bisa dibaca', options: { style: 'neon', output: 'image' } },
+      { chatId: '123@c.us', senderId: '456@c.us' },
+    );
+    expect(result.mimetype).toBe('image/png');
+    expect(result.width).toBe(1024);
+    expect(result.height).toBe(1024);
+    const metadata = await Sharp(result.buffer).metadata();
+    expect(metadata.format).toBe('png');
+    expect(metadata.width).toBe(1024);
+    expect(metadata.height).toBe(1024);
+  });
+
   it('TtpGenerator validates empty text', () => {
     const context = { chatId: '123@c.us', senderId: '456@c.us' };
     expect(() => generator.validate({ type: 'ttp', text: '' }, context)).toThrow(

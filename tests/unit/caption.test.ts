@@ -85,6 +85,30 @@ describe('CaptionGenerator', () => {
     expect(meta.height).toBe(512);
   });
 
+  it('short captions remain readable in every placement', async () => {
+    for (const position of ['top', 'bottom', 'overlay']) {
+      const result = await generator.process(
+        { type: 'caption', mediaUrl: 'http://example.com/photo.png', text: 'Halo', options: { position } },
+        mockContext,
+      );
+      const { data, info } = await Sharp(result.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      let top = 512;
+      let bottom = -1;
+      for (let y = 0; y < 512; y++) {
+        for (let x = 0; x < 512; x++) {
+          const offset = (y * 512 + x) * info.channels;
+          if (data[offset] > 225 && data[offset + 1] > 225 && data[offset + 2] > 225 && data[offset + 3] > 0) {
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+      expect(bottom - top + 1).toBeGreaterThanOrEqual(38);
+      expect(top).toBeGreaterThan(0);
+      expect(bottom).toBeLessThan(511);
+    }
+  });
+
   it('renders top and overlay captions successfully at 512x512', async () => {
     for (const pos of ['top', 'overlay']) {
       const res = await generator.process(

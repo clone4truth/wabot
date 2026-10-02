@@ -3,7 +3,7 @@ import { StickerTemplate } from './types';
 import { StickerResult } from '../result';
 import { escapeXml, validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegionRendered, FittedRegionRenderedResult } from '../rendering/text-layout';
+import { fitTextIntoRegionRendered } from '../rendering/text-layout';
 
 /**
  * INVARIANT SEMUA TEMPLATE:
@@ -28,14 +28,15 @@ export class TerminalTemplate implements StickerTemplate {
       text: clean,
       width: 432,
       height: 340,
-      maxFontSize: 22,
+      maxFontSize: 36,
       minFontSize: 12,
       fontFamily: 'monospace',
+      maxCharsPerLine: (fontSize) => Math.max(1, Math.floor(432 / (fontSize * 0.62)) - 13),
       renderLine: (lines, fontSize, lineHeight) => {
         const startY = Math.round(fontSize * 0.85);
         return lines
           .map((line, idx) => {
-            const y = startY + idx * lineHeight + Math.round(fontSize * 0.85);
+            const y = startY + idx * lineHeight;
             const prefix = idx === 0
               ? '<tspan fill="#48bb78">user@wabot:~$ </tspan>'
               : '<tspan fill="#718096">&gt; </tspan>';
@@ -69,7 +70,7 @@ export class TerminalTemplate implements StickerTemplate {
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ quality: 90 }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -95,7 +96,7 @@ export class BreakingTemplate implements StickerTemplate {
       text: clean,
       width: 452,
       height: 300,
-      maxFontSize: 34,
+      maxFontSize: 72,
       minFontSize: 14,
       color: '#ffffff',
       outlineColor: '#000000',
@@ -125,7 +126,7 @@ export class BreakingTemplate implements StickerTemplate {
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ quality: 90 }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -151,7 +152,7 @@ export class WantedTemplate implements StickerTemplate {
       text: clean,
       width: 432,
       height: 220,
-      maxFontSize: 34,
+      maxFontSize: 72,
       minFontSize: 14,
       color: '#3b2f2f',
       outlineColor: 'transparent',
@@ -181,7 +182,7 @@ export class WantedTemplate implements StickerTemplate {
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ quality: 90 }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -207,7 +208,7 @@ export class MinimalTemplate implements StickerTemplate {
       text: clean,
       width: 432,
       height: 240,
-      maxFontSize: 34,
+      maxFontSize: 72,
       minFontSize: 14,
       color: '#f8fafc',
       outlineColor: 'transparent',
@@ -234,7 +235,7 @@ export class MinimalTemplate implements StickerTemplate {
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ quality: 90 }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',

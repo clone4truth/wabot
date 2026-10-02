@@ -9,7 +9,7 @@ import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
 import { escapeXml, validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegion, fitTextIntoRegionRendered, FittedRegionResult, FittedRegionRenderedResult } from '../rendering/text-layout';
+import { fitTextIntoRegion, fitTextIntoRegionRendered, FittedRegionResult } from '../rendering/text-layout';
 
 export class CaptionGenerator implements StickerGenerator {
   readonly name = 'caption';
@@ -32,7 +32,7 @@ export class CaptionGenerator implements StickerGenerator {
       text: clean,
       width: 480,
       height: 160,
-      maxFontSize: 28,
+      maxFontSize: 56,
       minFontSize: 14,
     });
   }
@@ -53,18 +53,19 @@ export class CaptionGenerator implements StickerGenerator {
       'bottom'
     ).toLowerCase();
 
-    const maxRegionH = position === 'overlay' ? 140 : 150;
+    const maxRegionH = 160;
     // Stage 1+2: logical wrap LALU ukur bounds piksel render aktual — menjamin
     // teks penuh ter-render tanpa clipping (CJK/emoji/wide glyphs termasuk).
     const fitted = await fitTextIntoRegionRendered({
       text: clean,
       width: 480,
       height: maxRegionH,
-      maxFontSize: 28,
+      maxFontSize: 56,
       minFontSize: 14,
+      outlineWidth: 1,
     });
 
-    const bannerHeight = position === 'overlay' ? 140 : Math.max(100, Math.min(180, fitted.totalHeight + 32));
+    const bannerHeight = Math.max(112, Math.min(192, fitted.totalHeight + 32));
     const imageHeight = 512 - bannerHeight;
 
     const { filePath } = await downloadMedia(mediaUrl);
@@ -126,7 +127,7 @@ export class CaptionGenerator implements StickerGenerator {
         ]);
       }
 
-      const webpBuffer = await finalSharp.webp({ quality: 90 }).toBuffer();
+      const webpBuffer = await finalSharp.webp({ quality: 95, preset: 'text', smartSubsample: true }).toBuffer();
       const meta = await Sharp(webpBuffer).metadata();
 
       return {

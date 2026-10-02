@@ -112,6 +112,36 @@ describe('Webhook V2 Studio & Creative Commands', () => {
     expect(String(wahaMocks.sendText.mock.calls[0][1])).toContain('tidak tersedia');
   });
 
+  it('!ttp --image style gold Hello -> sendImage native 1024px PNG', async () => {
+    const res = await postWebhook(rawMessage('!ttp --image style gold Hello'));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendSticker).not.toHaveBeenCalled();
+    expect(wahaMocks.sendImage).toHaveBeenCalledTimes(1);
+    const [, buffer] = wahaMocks.sendImage.mock.calls[0];
+    const metadata = await Sharp(buffer).metadata();
+    expect(metadata.format).toBe('png');
+    expect(metadata.width).toBe(1024);
+    expect(metadata.height).toBe(1024);
+  });
+
+  it('!ttp --image supports replied text', async () => {
+    const res = await postWebhook(rawMessage('!ttp --image', {
+      replyTo: { id: 'ttp-image-text', body: 'Tulisan dari balasan', participant: 'other@c.us' },
+    }));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendImage).toHaveBeenCalledTimes(1);
+    const [, buffer] = wahaMocks.sendImage.mock.calls[0];
+    expect((await Sharp(buffer).metadata()).width).toBe(1024);
+  });
+
+  it('!ttp --image rejects an unknown style without sending media', async () => {
+    const res = await postWebhook(rawMessage('!ttp --image style goldd Hello'));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendImage).not.toHaveBeenCalled();
+    expect(wahaMocks.sendSticker).not.toHaveBeenCalled();
+    expect(wahaMocks.sendText).toHaveBeenCalledTimes(1);
+  });
+
   it('!attp effect fade Hello -> sendSticker animated WebP', async () => {
     const res = await postWebhook(rawMessage('!attp effect fade Hello'));
     expect(res.statusCode).toBe(200);
@@ -172,6 +202,26 @@ describe('Webhook V2 Studio & Creative Commands', () => {
       replyTo: { id: 'media-blur', media: { url: 'http://example.com/src.png', mimetype: 'image/png' } },
     });
     const res = await postWebhook(raw);
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
+  });
+
+  it('reply padded image + !stiker -> sendSticker with enlarged content', async () => {
+    const res = await postWebhook(rawMessage('!stiker', {
+      replyTo: { id: 'media-visible', media: { url: 'http://example.com/src.png', mimetype: 'image/png' } },
+    }));
+    expect(res.statusCode).toBe(200);
+    expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
+    const [, buffer] = wahaMocks.sendSticker.mock.calls[0];
+    const { info } = await Sharp(buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+    expect(info.width).toBeGreaterThan(470);
+    expect(info.height).toBeGreaterThan(470);
+  });
+
+  it('reply photo + !stiker trim -> sendSticker', async () => {
+    const res = await postWebhook(rawMessage('!stiker trim', {
+      replyTo: { id: 'media-trim', media: { url: 'http://example.com/src.png', mimetype: 'image/png' } },
+    }));
     expect(res.statusCode).toBe(200);
     expect(wahaMocks.sendSticker).toHaveBeenCalledTimes(1);
   });

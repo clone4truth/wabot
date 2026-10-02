@@ -1,12 +1,12 @@
 import Sharp from 'sharp';
 import { renderFittedText } from '../rendering/text-layout';
-import { StickerResult } from '../result';
-import { escapeXml, validateText } from '../rendering/text-utils';
+import { ProcessingResult } from '../result';
+import { validateText } from '../rendering/text-utils';
 
 import { getTtpStyle } from '../ttp/styles';
 
 export class TtpProcessor {
-  async process(text: string, style?: string): Promise<StickerResult> {
+  async process(text: string, style?: string, asImage = false): Promise<ProcessingResult> {
     const clean = validateText(text, { emptyMessage: 'Teks !ttp tidak boleh kosong' });
     const preset = getTtpStyle(style);
 
@@ -14,30 +14,36 @@ export class TtpProcessor {
 
     const { buffer: overlay } = await renderFittedText({
       text: clean,
-      maxWidth: 440,
-      maxHeight: 400,
-      maxFontSize: 64,
+      maxWidth: 480,
+      maxHeight: 448,
+      maxFontSize: 128,
       minFontSize: 18,
       margin: 16,
       color: preset.textColor,
       outlineColor: preset.outlineColor,
       outlineWidth: preset.outlineWidth,
+      outputScale: asImage ? 2 : 1,
     });
 
-    const webpBuffer = await Sharp(bg)
-      .composite([{ input: overlay, gravity: 'center' }])
-      .webp({ quality: 90 })
-      .toBuffer();
+    // Rasterize both SVG layers at their final resolution so PNG text stays
+    // crisp at 1024px, including its outlines and background details.
+    const composed = Sharp(bg, { density: asImage ? 144 : 72 })
+      .composite([{ input: overlay, gravity: 'center' }]);
+    const buffer = await (asImage
+      ? composed.png({ compressionLevel: 9 })
+      : composed.webp({ lossless: true, preset: 'text' })
+    ).toBuffer();
 
-    const meta = await Sharp(webpBuffer).metadata();
+    const meta = await Sharp(buffer).metadata();
+    const dimension = asImage ? 1024 : 512;
 
     return {
-      buffer: webpBuffer,
-      mimetype: 'image/webp',
-      width: meta.width || 512,
-      height: meta.height || 512,
+      buffer,
+      mimetype: asImage ? 'image/png' : 'image/webp',
+      width: meta.width || dimension,
+      height: meta.height || dimension,
       animated: false,
-      size: webpBuffer.length,
+      size: buffer.length,
     };
   }
 }

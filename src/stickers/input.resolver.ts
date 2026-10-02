@@ -40,7 +40,7 @@ export interface ResolvedInput {
 
 const TEXT_MODIFIERS = ['teks', 'quote', 'bubble'];
 const IMAGE_MODIFIERS = [
-  'full', 'crop', 'circle', 'meme',
+  'full', 'crop', 'trim', 'circle', 'meme',
   'blur', 'grayscale', 'sepia', 'invert', 'pixel', 'sharpen', 'shadow',
   'removebg', 'subject', 'outline', 'caption',
 ];

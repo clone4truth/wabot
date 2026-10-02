@@ -1,7 +1,8 @@
 import Sharp from 'sharp';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { escapeXml, wrapWords, countGraphemes, sliceGraphemes } from './text-utils';
+import { escapeXml, wrapWords, splitGraphemes } from './text-utils';
+import { fitTextIntoRegionRendered, FittedRegionRenderedResult } from './text-layout';
 
 // Palet warna nama ala WhatsApp.
 const NAME_COLORS = ['#ff8fab', '#ffb86b', '#ffd60a', '#7bed6f', '#4cc9f0', '#b892ff', '#ff6b6b', '#4dd0a6'];
@@ -34,105 +35,151 @@ export function wrapText(text: string, maxChars: number, maxLines: number): stri
   return wrapWords(text, maxChars, maxLines);
 }
 
+/** Metadata boleh diringkas, tetapi setiap preview tetap diukur dan diberi ellipsis. */
+async function fitPreview(
+  text: string,
+  width: number,
+  fontSize: number,
+  maxLines: number,
+  fontWeight = 'normal',
+  maxGraphemes = 140,
+): Promise<FittedRegionRenderedResult> {
+  const graphemes = splitGraphemes(String(text ?? '').replace(/\s+/g, ' ').trim() || '—');
+  const height = Math.round(fontSize * 1.35) * maxLines;
+  const fit = async (length: number): Promise<FittedRegionRenderedResult | null> => {
+    const preview = graphemes.slice(0, length).join('').trimEnd() + (length < graphemes.length ? '…' : '');
+    try {
+      return await fitTextIntoRegionRendered({
+        text: preview,
+        width,
+        height,
+        minFontSize: fontSize,
+        maxFontSize: fontSize,
+        lineHeightFactor: 1.35,
+        fontFamily: 'sans-serif',
+        fontWeight,
+        outlineWidth: 0,
+      });
+    } catch (error) {
+      if (error instanceof AppError && error.code === ErrorCode.TEXT_TOO_LONG) return null;
+      throw error;
+    }
+  };
+
+  const limit = Math.min(graphemes.length, maxGraphemes);
+  const complete = await fit(limit);
+  if (complete) return complete;
+
+  let low = 0;
+  let high = limit - 1;
+  let result = await fit(0);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = await fit(middle);
+    if (candidate) {
+      result = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (!result) throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Preview tidak muat dalam bubble');
+  return result;
+}
+
 export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Promise<Buffer> {
   const { senderName, senderId, quoted, avatar } = options;
   const text = String(options.text ?? '').trim();
+  if (!text) throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Teks tidak boleh kosong');
   const time = options.time || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
   const W = 512;
-  const bubbleX = 30;
-  const bubbleW = 452;
-  const pad = 26;
+  const bubbleX = 18;
+  const bubbleW = 476;
+  const pad = 20;
+  const contentX = pad;
+  const innerW = bubbleW - pad * 2;
 
-  // Kolom avatar di kiri bila foto profil tersedia.
-  const avatarSize = 76;
-  const avatarGap = 18;
-  const indent = avatar ? avatarSize + avatarGap : 0;
-  const contentX = pad + indent;
-  const innerW = bubbleW - pad - indent - pad;
+  // Avatar hanya menempati header: seluruh lebar bubble tersedia untuk isi pesan.
+  const avatarSize = 56;
+  const avatarGap = 12;
+  const nameX = contentX + (avatar ? avatarSize + avatarGap : 0);
+  const nameWidth = innerW - (avatar ? avatarSize + avatarGap : 0);
 
-  const nameSize = 30;
-  const quoteNameSize = 24;
-  const quoteBodySize = 24;
+  const nameSize = 28;
+  const quoteNameSize = 22;
+  const quoteBodySize = 22;
   const timeSize = 22;
-
   const lh = (s: number) => Math.round(s * 1.35);
-
   const nameColor = senderColor(senderId || senderName);
   const quotedColor = senderColor(quoted?.senderId || quoted?.senderName || '?');
 
-  // Preview kutipan: sengaja dibatasi maksimal 140 grapheme cluster untuk ringkasan UI chat WhatsApp.
-  const quotedRaw = quoted ? sliceGraphemes(quoted.body, 0, 140) : '';
-  const quotedSuffix = quoted && countGraphemes(quoted.body) > 140 ? '...' : '';
-  const quotedPreview = quoted ? `${quotedRaw}${quotedSuffix}` : '';
-  const quotedLines = quoted ? wrapWords(quotedPreview, Math.max(4, Math.floor(innerW / (quoteBodySize * 0.62)) - 4), 2) : [];
+  const quotePad = 12;
+  const quoteTextX = contentX + quotePad + 4;
+  const quoteWidth = innerW - quotePad * 2 - 4;
+  const [nameLayout, timeLayout, quoteNameLayout, quoteBodyLayout] = await Promise.all([
+    fitPreview(senderName, nameWidth, nameSize, 1, 'bold', 80),
+    fitPreview(time, innerW, timeSize, 1, 'normal', 80),
+    quoted ? fitPreview(quoted.senderName, quoteWidth, quoteNameSize, 1, 'bold', 80) : null,
+    quoted ? fitPreview(quoted.body, quoteWidth, quoteBodySize, 2) : null,
+  ]);
 
-  // Hitung tinggi komponen tetap sebelum teks utama
-  const nameH = lh(nameSize) + 8;
-  const quoteH = quoted ? (14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14 + 12) : 0;
-  const timeH = 4 + lh(timeSize);
-  const fixedH = pad + 8 + nameH + quoteH + timeH + pad;
-
-  // Batas maksimum tinggi bubble agar muat di canvas 512x512 dengan margin atas/bawah minimal 14px
-  const maxBubbleH = W - 28; // 484px
+  const headerH = Math.max(nameLayout.totalHeight, avatar ? avatarSize : 0);
+  const headerGap = 12;
+  const quoteBoxH = quoted ? quotePad * 2 + quoteNameLayout!.totalHeight + quoteBodyLayout!.totalHeight : 0;
+  const quoteH = quoted ? quoteBoxH + 12 : 0;
+  const timeH = 4 + timeLayout.totalHeight;
+  const fixedH = pad + headerH + headerGap + quoteH + timeH + pad;
+  const maxBubbleH = W - 24;
   const maxAvailableTextH = maxBubbleH - fixedH;
 
-  // Adaptive font layout fitting: coba font 34 turun hingga 18
-  let chosenTextSize = 18;
-  let chosenTextLines: string[] = [];
-  let foundFit = false;
+  // Pilih teks terbesar yang benar-benar muat; isi utama tidak pernah dipotong.
+  const textLayout = await fitTextIntoRegionRendered({
+    text,
+    width: innerW,
+    height: maxAvailableTextH,
+    maxFontSize: 56,
+    minFontSize: 18,
+    lineHeightFactor: 1.25,
+    fontFamily: 'sans-serif',
+    fontWeight: 'normal',
+    outlineWidth: 0,
+  });
 
-  for (let size = 34; size >= 18; size -= 2) {
-    const maxChars = Math.max(4, Math.floor(innerW / (size * 0.62)));
-    const lines = wrapWords(text, maxChars);
-    const textH = lines.length * lh(size);
-    if (textH <= maxAvailableTextH) {
-      chosenTextSize = size;
-      chosenTextLines = lines;
-      foundFit = true;
-      break;
-    }
-  }
-
-  if (!foundFit) {
-    throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks terlalu panjang untuk dimuat ke dalam bubble');
-  }
-
-  let y = pad + 8;
+  let y = pad;
   const parts: string[] = [];
 
-  // Nama pengirim
-  parts.push(`<text x="${contentX}" y="${y + nameSize}" font-family="sans-serif" font-size="${nameSize}" font-weight="bold" fill="${nameColor}">${escapeXml(senderName)}</text>`);
-  y += nameH;
+  const nameY = y + Math.round((headerH - nameLayout.totalHeight) / 2) + nameSize;
+  parts.push(`<text x="${nameX}" y="${nameY}" font-family="sans-serif" font-size="${nameSize}" font-weight="bold" fill="${nameColor}">${escapeXml(nameLayout.lines[0])}</text>`);
+  y += headerH + headerGap;
 
   // Blok quote (balasan)
   if (quoted) {
-    const qBoxH = 14 + lh(quoteNameSize) + quotedLines.length * lh(quoteBodySize) + 14;
-    parts.push(`<rect x="${contentX - 10}" y="${y}" width="${innerW + 20}" height="${qBoxH}" rx="12" fill="#ffffff" opacity="0.07"/>`);
-    parts.push(`<rect x="${contentX - 10}" y="${y}" width="7" height="${qBoxH}" rx="3.5" fill="${quotedColor}"/>`);
-    let qy = y + 14;
-    parts.push(`<text x="${contentX + 12}" y="${qy + quoteNameSize}" font-family="sans-serif" font-size="${quoteNameSize}" font-weight="bold" fill="${quotedColor}">${escapeXml(quoted.senderName)}</text>`);
+    parts.push(`<rect x="${contentX}" y="${y}" width="${innerW}" height="${quoteBoxH}" rx="10" fill="#ffffff" opacity="0.07"/>`);
+    parts.push(`<rect x="${contentX}" y="${y}" width="5" height="${quoteBoxH}" rx="2.5" fill="${quotedColor}"/>`);
+    let qy = y + quotePad;
+    parts.push(`<text x="${quoteTextX}" y="${qy + quoteNameSize}" font-family="sans-serif" font-size="${quoteNameSize}" font-weight="bold" fill="${quotedColor}">${escapeXml(quoteNameLayout!.lines[0])}</text>`);
     qy += lh(quoteNameSize);
-    for (const line of quotedLines) {
-      parts.push(`<text x="${contentX + 12}" y="${qy + quoteBodySize}" font-family="sans-serif" font-size="${quoteBodySize}" fill="#cfd4d9">${escapeXml(line)}</text>`);
+    for (const line of quoteBodyLayout!.lines) {
+      parts.push(`<text x="${quoteTextX}" y="${qy + quoteBodySize}" font-family="sans-serif" font-size="${quoteBodySize}" fill="#cfd4d9">${escapeXml(line)}</text>`);
       qy += lh(quoteBodySize);
     }
-    y += qBoxH + 12;
+    y += quoteH;
   }
 
   // Teks utama adaptif tanpa silent truncation
-  for (const line of chosenTextLines) {
-    parts.push(`<text x="${contentX}" y="${y + chosenTextSize}" font-family="sans-serif" font-size="${chosenTextSize}" fill="#ffffff">${escapeXml(line)}</text>`);
-    y += lh(chosenTextSize);
+  for (const line of textLayout.lines) {
+    parts.push(`<text x="${contentX}" y="${y + textLayout.fontSize}" font-family="sans-serif" font-size="${textLayout.fontSize}" fill="#ffffff">${escapeXml(line)}</text>`);
+    y += textLayout.lineHeight;
   }
 
   // Jam
   y += 4;
-  parts.push(`<text x="${contentX + innerW}" y="${y + timeSize}" font-family="sans-serif" font-size="${timeSize}" fill="#8696a0" text-anchor="end">${escapeXml(time)}</text>`);
+  parts.push(`<text x="${contentX + innerW}" y="${y + timeSize}" font-family="sans-serif" font-size="${timeSize}" fill="#8696a0" text-anchor="end">${escapeXml(timeLayout.lines[0])}</text>`);
   y += lh(timeSize);
 
   const bubbleH = y + pad;
-  const bubbleY = Math.max(14, Math.round((W - bubbleH) / 2));
+  const bubbleY = Math.max(12, Math.round((W - bubbleH) / 2));
 
   // Avatar lingkaran di kiri atas bubble
   let defs = '';
@@ -140,7 +187,7 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   if (avatar) {
     const dataUri = `data:${avatar.mimetype};base64,${avatar.buffer.toString('base64')}`;
     const cx = bubbleX + pad + avatarSize / 2;
-    const cy = bubbleY + pad + 8 + avatarSize / 2;
+    const cy = bubbleY + pad + avatarSize / 2;
     defs = `<defs><clipPath id="av"><circle cx="${cx}" cy="${cy}" r="${avatarSize / 2}"/></clipPath></defs>`;
     avatarEl = `<image href="${dataUri}" x="${cx - avatarSize / 2}" y="${cy - avatarSize / 2}" width="${avatarSize}" height="${avatarSize}" clip-path="url(#av)" preserveAspectRatio="xMidYMid slice"/>`;
   }

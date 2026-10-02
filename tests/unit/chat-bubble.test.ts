@@ -10,6 +10,28 @@ function isWebp(buf: Buffer): boolean {
   return buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP';
 }
 
+async function inkBounds(buf: Buffer, onlyMainText = false) {
+  const { data, info } = await Sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let left = info.width;
+  let top = info.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      const offset = (y * info.width + x) * info.channels;
+      const visible = data[offset + 3] >= 200;
+      const white = data[offset] >= 225 && data[offset + 1] >= 225 && data[offset + 2] >= 225;
+      if (visible && (!onlyMainText || white)) {
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x);
+        bottom = Math.max(bottom, y);
+      }
+    }
+  }
+  return { left, top, right, bottom, width: right - left + 1, height: bottom - top + 1 };
+}
+
 describe('Chat bubble renderer', () => {
   it('warna nama deterministik per pengirim', () => {
     expect(senderColor('111@lid')).toBe(senderColor('111@lid'));
@@ -24,6 +46,16 @@ describe('Chat bubble renderer', () => {
   it('render bubble polos jadi webp valid', async () => {
     const buf = await renderChatBubbleToBuffer({ senderName: 'Budi', senderId: '1', text: 'halo' });
     expect(isWebp(buf)).toBe(true);
+  });
+
+  it('teks singkat tampil besar dan tetap berukuran 512 × 512', async () => {
+    const buf = await renderChatBubbleToBuffer({ senderName: 'Budi', senderId: '1', text: 'halo', time: '12:34' });
+    const metadata = await Sharp(buf).metadata();
+    const textBounds = await inkBounds(buf, true);
+    expect(metadata.width).toBe(512);
+    expect(metadata.height).toBe(512);
+    expect(textBounds.height).toBeGreaterThanOrEqual(40);
+    expect(textBounds.width).toBeGreaterThan(100);
   });
 
   it('render teks berbahaya (&,<,>) tanpa error invalid markup', async () => {
@@ -44,6 +76,32 @@ describe('Chat bubble renderer', () => {
     });
     expect(isWebp(buf)).toBe(true);
     expect(buf.length).toBeGreaterThan(1000);
+  });
+
+  it('avatar tidak mempersempit kolom isi pesan', async () => {
+    const avatar = await Sharp({
+      create: { width: 100, height: 100, channels: 3, background: '#2878c8' },
+    }).jpeg().toBuffer();
+    const buf = await renderChatBubbleToBuffer({
+      senderName: 'Budi', senderId: '1', text: 'MMMMMMM', time: '12:34',
+      avatar: { buffer: avatar, mimetype: 'image/jpeg' },
+    });
+    const textBounds = await inkBounds(buf, true);
+    expect(textBounds.left).toBeLessThan(70);
+    expect(textBounds.width).toBeGreaterThan(300);
+  });
+
+  it('nama, kutipan, dan glyph lebar tetap di dalam canvas tanpa overflow', async () => {
+    const buf = await renderChatBubbleToBuffer({
+      senderName: 'W'.repeat(100), senderId: '1', text: '界'.repeat(60), time: '12:34',
+      quoted: { senderName: '界'.repeat(100), body: 'W'.repeat(140) },
+    });
+    const bounds = await inkBounds(buf);
+    expect(bounds.left).toBeGreaterThanOrEqual(6);
+    expect(bounds.right).toBeLessThanOrEqual(493);
+    expect(bounds.top).toBeGreaterThanOrEqual(12);
+    expect(bounds.bottom).toBeLessThanOrEqual(499);
+    expect((await inkBounds(buf, true)).width).toBeGreaterThan(200);
   });
 
   it('mendukung teks 300 karakter secara adaptif', async () => {
@@ -76,5 +134,10 @@ describe('Chat bubble renderer', () => {
       }),
     ).rejects.toMatchObject({ code: 'TEXT_TOO_LONG' });
   });
-});
 
+  it('menolak teks kosong', async () => {
+    await expect(renderChatBubbleToBuffer({
+      senderName: 'Budi', senderId: '1', text: '   ',
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_INPUT' });
+  });
+});

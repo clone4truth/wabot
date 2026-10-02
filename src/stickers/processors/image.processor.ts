@@ -6,6 +6,7 @@ import { cleanupTempFile } from '../../media/temp-files';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { defaultEffectRegistry } from '../effects/registry';
+import { fitVisibleImage } from '../rendering/visible-image';
 
 export class ImageStickerProcessor {
   async process(
@@ -17,10 +18,9 @@ export class ImageStickerProcessor {
     const { filePath, mimeType } = await this.downloadAndValidate(imageUrl, timeoutMs, signal);
 
     try {
-      const metadata = await sharp(filePath, sharpInputOptions()).metadata();
       const canvasSize = { width: 512, height: 512 };
 
-      let sharpInstance = sharp(filePath, sharpInputOptions());
+      let sharpInstance = sharp(filePath, sharpInputOptions()).rotate();
       let outWidth = canvasSize.width;
       let outHeight = canvasSize.height;
 
@@ -34,11 +34,18 @@ export class ImageStickerProcessor {
       } else {
         switch (modifier) {
           case 'full':
-            sharpInstance = sharpInstance.resize(canvasSize.width, canvasSize.height, {
-              fit: 'contain',
-              background: { r: 0, g: 0, b: 0, alpha: 0 },
-            });
+            sharpInstance = await fitVisibleImage(filePath);
             break;
+          case 'trim': {
+            // Explicit opt-in for opaque, uniform borders (e.g. white margins
+            // around a screenshot). Default full retains all visible pixels.
+            const trimmed = await sharpInstance
+              .trim({ threshold: 10, lineArt: true })
+              .png()
+              .toBuffer();
+            sharpInstance = await fitVisibleImage(trimmed);
+            break;
+          }
           case 'crop':
             sharpInstance = sharpInstance.resize(canvasSize.width, canvasSize.height, {
               fit: 'cover',
@@ -60,14 +67,11 @@ export class ImageStickerProcessor {
             break;
           }
           default:
-            sharpInstance = sharpInstance.resize(canvasSize.width, canvasSize.height, {
-              fit: 'contain',
-              background: { r: 0, g: 0, b: 0, alpha: 0 },
-            });
+            sharpInstance = await fitVisibleImage(filePath);
         }
       }
 
-      const webpBuffer = await sharpInstance.webp({ quality: 90 }).toBuffer();
+      const webpBuffer = await sharpInstance.webp({ quality: 95, smartSubsample: true }).toBuffer();
       const meta = await sharp(webpBuffer).metadata();
 
       return {

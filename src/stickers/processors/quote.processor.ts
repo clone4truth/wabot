@@ -16,8 +16,8 @@ export class QuoteProcessor {
       text: quoteText,
       maxWidth: 512,
       maxHeight: 512,
-      margin: 32,
-      maxFontSize: 44,
+      margin: 24,
+      maxFontSize: 96,
       minFontSize: 18,
       color: '#ffffff',
       outlineColor: '#000000',
@@ -26,7 +26,7 @@ export class QuoteProcessor {
     });
 
     const webpBuffer = await sharp(buffer, sharpInputOptions())
-      .webp({ quality: 90, preset: 'text' })
+      .webp({ lossless: true, preset: 'text' })
       .toBuffer();
 
     const meta = await sharp(webpBuffer).metadata();

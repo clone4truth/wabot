@@ -28,6 +28,6 @@ export class TtpGenerator implements StickerGenerator {
   async process(input: GeneratorInput, _context: GeneratorContext): Promise<ProcessingResult> {
     const text = (input.text ?? input.content?.text ?? '') as string;
     const style = (input.options?.style ?? input.content?.style) as string | undefined;
-    return this.processor.process(text, style);
+    return this.processor.process(text, style, input.options?.output === 'image');
   }
 }

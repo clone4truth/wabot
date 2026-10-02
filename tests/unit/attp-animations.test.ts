@@ -47,6 +47,35 @@ describe('ATTP Animation Presets & AttpGenerator', () => {
     expect((meta.pages ?? 1) > 1).toBe(true);
   }, 10000);
 
+  it('enlarged text and motion stay within safe frame edges', async () => {
+    for (const effect of ['rainbow', 'zoom', 'slide', 'bounce']) {
+      const result = await processor.process('WWWW Halo', effect);
+      const { data, info } = await Sharp(result.buffer, { animated: true }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const frameHeight = info.height / 8;
+      for (let frame = 0; frame < 8; frame++) {
+        let left = 512;
+        let right = -1;
+        let top = frameHeight;
+        let bottom = -1;
+        for (let y = 0; y < frameHeight; y++) {
+          for (let x = 0; x < 512; x++) {
+            const offset = ((frame * frameHeight + y) * 512 + x) * info.channels;
+            if (data[offset + 3] === 0) continue;
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+        expect(left).toBeGreaterThan(0);
+        expect(right).toBeLessThan(511);
+        expect(top).toBeGreaterThan(0);
+        expect(bottom).toBeLessThan(511);
+        expect(bottom - top + 1).toBeGreaterThan(120);
+      }
+    }
+  }, 10000);
+
   it('AttpGenerator supports attp type', () => {
     expect(generator.supports({ type: 'attp' })).toBe(true);
     expect(generator.supports({ type: 'ttp' })).toBe(false);

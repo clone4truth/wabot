@@ -27,6 +27,8 @@ export interface FittedTextOptions extends TextLayoutOptions {
   minFontSize?: number;
   maxFontSize?: number;
   margin?: number;
+  /** Rasterize the final SVG at this scale; fitting uses the logical dimensions. */
+  outputScale?: number;
 }
 
 export interface TextLayoutMetrics {
@@ -76,7 +78,7 @@ export function calculateTextLayout(options: {
   };
 }
 
-async function renderSingleLine(
+function buildTextLayer(
   text: string,
   maxWidth: number,
   maxHeight: number,
@@ -86,7 +88,7 @@ async function renderSingleLine(
   outlineColor: string,
   outlineWidth: number,
   margin: number = 16,
-): Promise<Buffer> {
+): string {
   const family = getFontFamily(getDefaultFontPath());
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const ax = align === 'left' ? margin : align === 'right' ? maxWidth - margin : maxWidth / 2;
@@ -105,6 +107,21 @@ async function renderSingleLine(
     })
     .join('');
 
+  return texts;
+}
+
+async function renderSingleLine(
+  text: string,
+  maxWidth: number,
+  maxHeight: number,
+  fontSize: number,
+  color: string,
+  align: 'left' | 'center' | 'right',
+  outlineColor: string,
+  outlineWidth: number,
+  margin: number = 16,
+): Promise<Buffer> {
+  const texts = buildTextLayer(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth, margin);
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}">` +
     texts +
@@ -134,6 +151,12 @@ export interface FittedTextResult {
   fontSize: number;
 }
 
+function* fontSizeCandidates(max: number, min: number, step: number): Generator<number> {
+  if (!Number.isFinite(step) || step <= 0) throw new RangeError('Font size step must be positive');
+  for (let size = max; size > min; size -= step) yield size;
+  if (max >= min) yield min;
+}
+
 /**
  * Cari font terbesar agar hasil render aktual muat di safe area.
  * Menggunakan validasi 2-level:
@@ -149,12 +172,17 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
     margin = 16,
     minFontSize = 16,
     maxFontSize = 96,
+    outputScale = 1,
   } = options;
   const safeW = maxWidth - margin * 2;
   const safeH = maxHeight - margin * 2;
 
+  if (!Number.isFinite(outputScale) || outputScale <= 0) {
+    throw new RangeError('outputScale must be a positive finite number');
+  }
+
   let lastError: unknown = null;
-  for (let size = maxFontSize; size >= minFontSize; size -= 4) {
+  for (const size of fontSizeCandidates(maxFontSize, minFontSize, 4)) {
     const layout = calculateTextLayout({
       text,
       maxWidth,
@@ -169,20 +197,33 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
     }
 
     try {
-      const buffer = await renderTextToBuffer({ ...options, fontSize: size, margin } as any);
-      
-      // Level 2: Rendered pixel trim bounds check
-      const { info } = await Sharp(buffer).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
-      if (info.width <= safeW && info.height <= safeH) {
+      const textLayer = buildTextLayer(
+        text, maxWidth, maxHeight, size,
+        options.color ?? '#ffffff', options.align ?? 'center',
+        options.outlineColor ?? '#000000', options.outlineWidth ?? 2, margin,
+      );
+      // Measure the whole layer independently of the final SVG viewport. Trimming
+      // a clipped final raster cannot reveal glyphs that fell outside its canvas.
+      const measured = await measureRenderedTextLayer(textLayer, maxWidth, maxHeight, size);
+      if (measured.width <= safeW && measured.height <= safeH) {
+        const align = options.align ?? 'center';
+        const inkLeft = align === 'left' ? margin
+          : align === 'right' ? maxWidth - margin - measured.width
+          : Math.floor((maxWidth - measured.width) / 2);
+        const inkTop = Math.floor((maxHeight - measured.height) / 2);
+        const dx = inkLeft - measured.left;
+        const dy = inkTop - measured.top;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}"><g transform="translate(${dx},${dy})">${textLayer}</g></svg>`;
+        const buffer = await Sharp(Buffer.from(svg), { density: 72 * outputScale }).png().toBuffer();
         logger.debug('Text layout selected', {
           fontSize: size,
           lineCount: layout.lines.length,
-          renderWidth: info.width,
-          renderHeight: info.height,
+          renderWidth: measured.width,
+          renderHeight: measured.height,
         });
         return { buffer, fontSize: size };
       }
-      lastError = new Error(`rendered trim overflow (${info.width}x${info.height} > ${safeW}x${safeH}) at ${size}px`);
+      lastError = new Error(`rendered text overflow (${measured.width}x${measured.height} > ${safeW}x${safeH}) at ${size}px`);
     } catch (err) {
       lastError = err;
     }
@@ -271,6 +312,8 @@ export interface FitTextRegionRenderedOptions {
   maxFontSize?: number;
   minFontSize?: number;
   lineHeightFactor?: number;
+  /** Initial wrapping capacity, for example after reserving a terminal prefix. */
+  maxCharsPerLine?: (fontSize: number) => number;
   fontWeight?: string;
   color?: string;
   outlineColor?: string;
@@ -301,11 +344,59 @@ export interface FittedRegionRenderedResult {
  * via trim(). Hanya teks-layer yang dirender — tanpa background — sehingga trim box
  * mencerminkan tepi glyph+outline sebenarnya.
  */
-async function measureRenderedTextLayer(svg: string): Promise<{ width: number; height: number }> {
-  const { info } = await Sharp(Buffer.from(svg))
-    .trim({ threshold: 10 })
-    .toBuffer({ resolveWithObject: true });
-  return { width: info.width ?? 0, height: info.height ?? 0 };
+interface RenderedTextBounds {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+}
+
+async function measureRenderedTextLayer(
+  textLayer: string,
+  logicalWidth: number,
+  logicalHeight: number,
+  fontSize: number,
+): Promise<RenderedTextBounds> {
+  let padX = Math.ceil(Math.max(logicalWidth, fontSize * 4));
+  let padY = Math.ceil(Math.max(logicalHeight, fontSize * 4));
+
+  // Padding keeps negative bearings, outlines, wide glyphs and custom prefixes
+  // visible. If ink still touches the measurement edge, grow and measure again.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const width = Math.ceil(logicalWidth + padX * 2);
+    const height = Math.ceil(logicalHeight + padY * 2);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><g transform="translate(${padX},${padY})">${textLayer}</g></svg>`;
+    const { data, info } = await Sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let minX = info.width;
+    let minY = info.height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let i = info.channels - 1; i < data.length; i += info.channels) {
+      if (data[i] === 0) continue;
+      const pixel = (i - (info.channels - 1)) / info.channels;
+      const x = pixel % info.width;
+      const y = Math.floor(pixel / info.width);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+
+    if (maxX < 0) throw new Error('Text layer contains no visible glyphs');
+    if (minX > 0 && minY > 0 && maxX < info.width - 1 && maxY < info.height - 1) {
+      return {
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+        left: minX - padX,
+        top: minY - padY,
+      };
+    }
+    padX *= 2;
+    padY *= 2;
+  }
+
+  throw new Error('Text layer exceeds the unclipped measurement canvas');
 }
 
 /**
@@ -347,49 +438,49 @@ export async function fitTextIntoRegionRendered(
 
   let lastMeasure: { width: number; height: number } | null = null;
 
-  for (let size = maxFontSize; size >= minFontSize; size -= step) {
+  for (const size of fontSizeCandidates(maxFontSize, minFontSize, step)) {
     // Stage 1: logical wrap (grapheme-aware) untuk kandidat baris.
-    const charsPerLine = Math.max(4, Math.floor(width / (size * 0.62)));
-    const lines = wrapWords(text, charsPerLine);
-    const lineHeight = Math.round(size * lineHeightFactor);
-    const totalHeight = lines.length * lineHeight;
+    let charsPerLine = Math.max(1, Math.floor(options.maxCharsPerLine
+      ? options.maxCharsPerLine(size)
+      : width / (size * 0.62)));
 
-    if (totalHeight > height) {
-      continue; // logical overflow — langsung ke font lebih kecil
-    }
+    // A width estimate can undercount emoji/CJK/wide letters. Tighten wrapping
+    // first, keeping the larger font when the resulting full text still fits.
+    while (charsPerLine >= 1) {
+      const lines = wrapWords(text, charsPerLine);
+      const lineHeight = Math.round(size * lineHeightFactor);
+      const totalHeight = lines.length * lineHeight;
+      if (totalHeight > height) break;
 
-    // Stage 2: render actual text layer dan ukur bounds piksel.
-    const startY = Math.round(size * 0.85);
-    const textElements = renderLine
-      ? renderLine(lines, size, lineHeight)
-      : lines
-          .map((line, idx) => {
-            const y = startY + idx * lineHeight + Math.round(size * 0.85);
-            return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${size}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
-          })
-          .join('');
+      const startY = Math.round(size * 0.85);
+      const textElements = renderLine
+        ? renderLine(lines, size, lineHeight)
+        : lines
+            .map((line, idx) => {
+              const y = startY + idx * lineHeight;
+              return `<text x="${canvasW / 2}" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${size}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
+            })
+            .join('');
 
-    const measureSvg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}" viewBox="0 0 ${canvasW} ${canvasH}">` +
-      textElements +
-      `</svg>`;
-
-    try {
-      const measured = await measureRenderedTextLayer(measureSvg);
-      lastMeasure = measured;
-      if (measured.width <= width && measured.height <= height) {
-        return {
-          lines,
-          fontSize: size,
-          lineHeight,
-          totalHeight,
-          renderedWidth: measured.width,
-          renderedHeight: measured.height,
-        };
+      try {
+        const measured = await measureRenderedTextLayer(textElements, canvasW, canvasH, size);
+        lastMeasure = measured;
+        if (measured.width <= width && measured.height <= height) {
+          return {
+            lines,
+            fontSize: size,
+            lineHeight,
+            totalHeight,
+            renderedWidth: measured.width,
+            renderedHeight: measured.height,
+          };
+        }
+        if (measured.width <= width || charsPerLine === 1) break;
+        charsPerLine = Math.max(1, Math.min(charsPerLine - 1, Math.floor(charsPerLine * width / measured.width)));
+      } catch {
+        // Render/measurement failure — try a smaller font without hiding text.
+        break;
       }
-    } catch {
-      // Render/trim gagal (mis. teks kosong setelah escape) — lanjut ke font lebih kecil.
-      continue;
     }
   }
 
@@ -398,4 +489,3 @@ export async function fitTextIntoRegionRendered(
     `Teks tidak muat setelah diukur render aktual (safe ${width}x${height}, terakhir ${lastMeasure ? `${lastMeasure.width}x${lastMeasure.height}` : 'n/a'})`,
   );
 }
-

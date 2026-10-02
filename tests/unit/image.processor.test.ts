@@ -76,4 +76,28 @@ describe('ImageStickerProcessor circle mask', () => {
     // File temp harus langsung tidak ada di filesystem (tanpa menunggu TTL)
     expect(fs.existsSync(p)).toBe(false);
   });
+
+  it('full enlarges visible content by removing transparent outer padding', async () => {
+    const p = `/tmp/test_transparent_img_${Date.now()}_${counter++}.png`;
+    const png = await Sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect x="320" y="320" width="160" height="160" fill="black"/></svg>')).png().toBuffer();
+    fs.writeFileSync(p, png);
+    dlMock.downloadMedia.mockResolvedValue({ filePath: p, mimeType: 'image/png', size: png.length });
+    const result = await new ImageStickerProcessor().process('http://x/a.png', 'full');
+    expect(await alphaAt(result.buffer, 0.1, 0.5)).toBeGreaterThan(200);
+    expect(await alphaAt(result.buffer, 0.01, 0.5)).toBe(0);
+    expect(fs.existsSync(p)).toBe(false);
+  });
+
+  it('trim enlarges content with uniform opaque borders', async () => {
+    const p = `/tmp/test_white_margin_${Date.now()}_${counter++}.png`;
+    const png = await Sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect width="800" height="800" fill="white"/><rect x="320" y="320" width="160" height="160" fill="black"/></svg>')).png().toBuffer();
+    fs.writeFileSync(p, png);
+    dlMock.downloadMedia.mockResolvedValue({ filePath: p, mimeType: 'image/png', size: png.length });
+    const result = await new ImageStickerProcessor().process('http://x/a.png', 'trim');
+    const { data } = await Sharp(result.buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect(result.width).toBe(512);
+    expect(result.height).toBe(512);
+    expect(data[0]).toBeLessThan(30);
+    expect(fs.existsSync(p)).toBe(false);
+  });
 });

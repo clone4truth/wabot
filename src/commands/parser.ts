@@ -9,7 +9,7 @@ export interface ParsedCommand {
 }
 
 const RESERVED_MODIFIERS = [
-  'full', 'crop', 'circle', 'quote', 'bubble', 'meme', 'teks',
+  'full', 'crop', 'trim', 'circle', 'quote', 'bubble', 'meme', 'teks',
   // Image effects
   'blur', 'grayscale', 'sepia', 'invert', 'pixel', 'sharpen', 'shadow',
   // Creative tools
@@ -63,9 +63,15 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
       }
     }
   } else if (commandName === 'ttp') {
-    if (firstPart === 'style' && parts[1]) {
-      options = { style: parts[1].toLowerCase() };
-      remainingArgs = parts.slice(2).join(' ');
+    let styleOffset = 0;
+    if (firstPart === '--image') {
+      options = { output: 'image' };
+      styleOffset = 1;
+      remainingArgs = argsStr.replace(/^--image(?:\s+|$)/i, '');
+    }
+    if (parts[styleOffset]?.toLowerCase() === 'style' && parts[styleOffset + 1]) {
+      options = { ...options, style: parts[styleOffset + 1].toLowerCase() };
+      remainingArgs = parts.slice(styleOffset + 2).join(' ');
     }
   } else if (commandName === 'attp') {
     if (firstPart === 'effect' && parts[1]) {

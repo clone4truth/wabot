@@ -9,7 +9,8 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 | Perintah | Input | Deskripsi | Batasan / Opsi |
 | :--- | :--- | :--- | :--- |
 | `!stiker` | Reply/kirim foto/video/teks | Auto-deteksi input dan buat stiker | Maks 15MB foto, 20MB video (maks 10 detik) |
-| `!stiker full` | Reply/kirim foto | Stiker penuh tanpa crop (fit contain) | Rasio asli terjaga, background transparan |
+| `!stiker full` | Reply/kirim foto | Stiker penuh dengan tepi transparan kosong dipangkas | Rasio asli terjaga, sedikit padding aman di sekitar objek |
+| `!stiker trim` | Reply/kirim foto | Pangkas margin latar seragam, lalu perbesar isi gambar | Cocok untuk margin putih/warna polos pada gambar atau screenshot |
 | `!stiker crop` | Reply/kirim foto | Stiker kotak penuh (fit cover) | Dipotong tengah 512x512 |
 | `!stiker circle` | Reply/kirim foto | Stiker bentuk lingkaran | Mask lingkaran transparan |
 | `!stiker meme <atas> \| <bawah>` | Reply/kirim foto | Stiker meme dengan teks atas dan bawah | Teks otomatis di-wrap dan di-scale |
@@ -51,6 +52,7 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 | `!stiker quote` | Reply chat | Stiker kutipan berbingkai nama pengirim | Otomatis ambil nama kontak WAHA |
 | `!stiker bubble` | Reply chat | Stiker chat bubble WhatsApp | Mendukung avatar & quoted reply |
 | `!ttp <teks>` | Teks | Stiker teks dengan preset visual | `!ttp style gold Halo`, `!ttp style dark Halo` (preset: gradient, minimal, dark, terminal, gold, neon) |
+| `!ttp --image <teks>` | Teks langsung/reply | Gambar PNG 1024×1024, dirender langsung pada resolusi penuh | `!ttp --image Tulisan besar`, `!ttp --image style gold Halo` |
 | `!attp <teks>` | Teks | Stiker teks animasi multi-frame WebP | `!attp effect fade Halo`, `!attp effect zoom Halo` (preset: rainbow, fade, zoom, blink, slide, bounce) |
 
 ---
@@ -66,3 +68,19 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 | `!ping` | Bebas | Cek status server dan latensi bot |
 | `!prefix <simbol>` | Simbol baru (grup: admin) | Mengubah prefix perintah (misal: `!prefix ?`) |
 | `!job` | Bebas | Melihat antrean / status proses stiker aktif milik pengirim |
+
+## Ukuran dan keterbacaan
+
+Stiker tetap 512×512. Font dipilih sebesar mungkin sesuai ruang yang tersedia;
+teks panjang otomatis dibungkus tanpa membuang isi teks. Bila tetap tidak muat,
+bot meminta teks lebih pendek.
+
+`!stiker` / `!stiker full` memperbesar isi PNG transparan dengan memangkas tepi
+yang sepenuhnya kosong. `removebg` dan `outline` juga memanfaatkan ruang kosong
+agar subjek tidak terlalu kecil. Untuk gambar dengan margin putih atau latar
+seragam, gunakan `!stiker trim`.
+
+Foto sangat lebar atau tinggi tetap menyisakan ruang di mode `full` agar seluruh
+gambar terlihat. Gunakan `!stiker crop` untuk mengisi kotak; periksa teks di tepi
+karena mode ini memotong sisi gambar. Untuk teks yang ingin dibuka dalam ukuran
+lebih besar, gunakan `!ttp --image` (PNG 1024×1024).
