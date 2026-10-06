@@ -105,6 +105,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-push
     environment: production
+    # Nonaktif sementara — hapus baris ini untuk mengaktifkan deploy lagi.
+    if: false
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
