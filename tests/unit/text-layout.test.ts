@@ -180,6 +180,7 @@ describe('Unicode + emoji', () => {
       .raw()
       .toBuffer({ resolveWithObject: true });
     let coloredPixels = 0;
+    let transparentPixels = 0;
     let left = info.width;
     let right = -1;
     let top = info.height;
@@ -191,7 +192,10 @@ describe('Unicode + emoji', () => {
         const green = data[offset + 1];
         const blue = data[offset + 2];
         const alpha = data[offset + 3];
-        if (alpha === 0) continue;
+        if (alpha === 0) {
+          transparentPixels++;
+          continue;
+        }
         left = Math.min(left, x);
         right = Math.max(right, x);
         top = Math.min(top, y);
@@ -203,6 +207,7 @@ describe('Unicode + emoji', () => {
     }
 
     expect(coloredPixels).toBeGreaterThan(1_000);
+    expect(transparentPixels).toBeGreaterThan(info.width * info.height * 0.6);
     expect(left).toBeGreaterThanOrEqual(16);
     expect(right).toBeLessThanOrEqual(495);
     expect(top).toBeGreaterThanOrEqual(16);

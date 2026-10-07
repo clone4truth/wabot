@@ -224,10 +224,16 @@ async function renderPangoColorLines(
   if (radius === 0) return textImage;
 
   const alphaMask = await Sharp(textImage).ensureAlpha().extractChannel(3).png().toBuffer();
+  const outline = parseHexColor(outlineColor);
   const silhouette = await Sharp({
-    create: { width, height, channels: 4, background: parseHexColor(outlineColor) },
+    create: {
+      width,
+      height,
+      channels: 3,
+      background: { r: outline.r, g: outline.g, b: outline.b },
+    },
   })
-    .composite([{ input: alphaMask, blend: 'dest-in' }])
+    .joinChannel(alphaMask)
     .png()
     .toBuffer();
 
