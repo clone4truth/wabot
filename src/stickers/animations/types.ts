@@ -5,15 +5,17 @@ export interface AnimationLayout {
   startY: number;
 }
 
-export interface AnimationContext {
-  text: string;
-  layout: AnimationLayout;
-  fontFamily: string;
+export interface AnimationFrameStyle {
+  color: string;
+  opacity?: number;
+  scale?: number;
+  dx?: number;
+  dy?: number;
 }
 
 export interface AnimationPreset {
   name: string;
   frameCount: number;
   fps: number;
-  renderSvg(frame: number, context: AnimationContext): string;
+  getFrameStyle(frame: number): AnimationFrameStyle;
 }

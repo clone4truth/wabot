@@ -1,9 +1,9 @@
 import Sharp from 'sharp';
 import { StickerTemplate } from './types';
 import { StickerResult } from '../result';
-import { escapeXml, validateText } from '../rendering/text-utils';
+import { validateText } from '../rendering/text-utils';
 import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegionRendered } from '../rendering/text-layout';
+import { renderFittedText } from '../rendering/text-layout';
 
 /**
  * INVARIANT SEMUA TEMPLATE:
@@ -21,41 +21,20 @@ export class TerminalTemplate implements StickerTemplate {
     const clean = validateText(input.text ?? '', { emptyMessage: 'Teks template terminal tidak boleh kosong' });
     const family = getFontFamily(getDefaultFontPath());
 
-    // PENTING (P1): prefix prompt `user@wabot:~$ ` (baris pertama) dan `> `
-    // (baris lanjutan) HARUS ikut diukur. Strategy: render kandidat baris DENGAN
-    // prefix aktual lalu ukur seluruh text-layer (bukan sekadar reserve width).
-    const fitted = await fitTextIntoRegionRendered({
+    const fitted = await renderFittedText({
       text: clean,
-      width: 432,
-      height: 340,
+      maxWidth: 432,
+      maxHeight: 330,
+      margin: 0,
       maxFontSize: 36,
       minFontSize: 12,
       fontFamily: 'monospace',
-      maxCharsPerLine: (fontSize) => Math.max(1, Math.floor(432 / (fontSize * 0.62)) - 13),
-      renderLine: (lines, fontSize, lineHeight) => {
-        const startY = Math.round(fontSize * 0.85);
-        return lines
-          .map((line, idx) => {
-            const y = startY + idx * lineHeight;
-            const prefix = idx === 0
-              ? '<tspan fill="#48bb78">user@wabot:~$ </tspan>'
-              : '<tspan fill="#718096">&gt; </tspan>';
-            return `<text x="40" y="${y}" font-family="monospace,${family}" font-size="${fontSize}" font-weight="bold" fill="#f7fafc">${prefix}${escapeXml(line)}</text>`;
-          })
-          .join('');
-      },
+      fontWeight: 'bold',
+      color: '#f7fafc',
+      outlineColor: 'transparent',
+      outlineWidth: 0,
+      align: 'left',
     });
-
-    const { lines, fontSize, lineHeight } = fitted;
-    const startY = 120 + Math.round(fontSize * 0.85);
-
-    const codeTexts = lines
-      .map((line, idx) => {
-        const y = startY + idx * lineHeight;
-        const prefix = idx === 0 ? '<tspan fill="#48bb78">user@wabot:~$ </tspan>' : '<tspan fill="#718096">&gt; </tspan>';
-        return `<text x="40" y="${y}" font-family="monospace,${family}" font-size="${fontSize}" font-weight="bold" fill="#f7fafc">${prefix}${escapeXml(line)}</text>`;
-      })
-      .join('');
 
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
@@ -66,11 +45,14 @@ export class TerminalTemplate implements StickerTemplate {
         <circle cx="62" cy="30" r="8" fill="#d69e2e"/>
         <circle cx="88" cy="30" r="8" fill="#38a169"/>
         <text x="256" y="36" text-anchor="middle" font-family="monospace,sans-serif" font-size="16" fill="#a0aec0">bash - 512×512</text>
-        ${codeTexts}
+        <text x="40" y="105" font-family="monospace,${family}" font-size="20" font-weight="bold" fill="#48bb78">user@wabot:~$</text>
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg))
+      .composite([{ input: fitted.contentBuffer, left: 40, top: 120 }])
+      .webp({ lossless: true, preset: 'text' })
+      .toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -92,26 +74,17 @@ export class BreakingTemplate implements StickerTemplate {
     const family = getFontFamily(getDefaultFontPath());
 
     // Rendered pixel bounds (P1): ukur text-layer aktual sebelum commit layout final.
-    const fitted = await fitTextIntoRegionRendered({
+    const fitted = await renderFittedText({
       text: clean,
-      width: 452,
-      height: 300,
+      maxWidth: 452,
+      maxHeight: 300,
+      margin: 0,
       maxFontSize: 72,
       minFontSize: 14,
       color: '#ffffff',
       outlineColor: '#000000',
-      outlineWidth: 1,
+      outlineWidth: 2,
     });
-
-    const { lines, fontSize, lineHeight, totalHeight } = fitted;
-    const startY = 150 + Math.round((300 - totalHeight) / 2) + Math.round(fontSize * 0.85);
-
-    const bodyTexts = lines
-      .map((line, idx) => {
-        const y = startY + idx * lineHeight;
-        return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff" stroke="#000000" stroke-width="2" paint-order="stroke">${escapeXml(line)}</text>`;
-      })
-      .join('');
 
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
@@ -122,11 +95,17 @@ export class BreakingTemplate implements StickerTemplate {
         <!-- Yellow ticker -->
         <rect x="0" y="100" width="512" height="24" fill="#facc15"/>
         <text x="256" y="117" text-anchor="middle" font-family="${family},sans-serif" font-size="14" font-weight="bold" fill="#000000" letter-spacing="2">● LIVE BROADCAST ●</text>
-        ${bodyTexts}
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg))
+      .composite([{
+        input: fitted.contentBuffer,
+        left: 30 + Math.round((452 - fitted.contentWidth) / 2),
+        top: 150 + Math.round((300 - fitted.contentHeight) / 2),
+      }])
+      .webp({ lossless: true, preset: 'text' })
+      .toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -148,25 +127,18 @@ export class WantedTemplate implements StickerTemplate {
     const family = getFontFamily(getDefaultFontPath());
 
     // Rendered pixel bounds (P1)
-    const fitted = await fitTextIntoRegionRendered({
+    const fitted = await renderFittedText({
       text: clean,
-      width: 432,
-      height: 220,
+      maxWidth: 432,
+      maxHeight: 220,
+      margin: 0,
       maxFontSize: 72,
       minFontSize: 14,
       color: '#3b2f2f',
       outlineColor: 'transparent',
+      outlineWidth: 0,
+      fontFamily: 'serif',
     });
-
-    const { lines, fontSize, lineHeight, totalHeight } = fitted;
-    const startY = 180 + Math.round((220 - totalHeight) / 2) + Math.round(fontSize * 0.85);
-
-    const bodyTexts = lines
-      .map((line, idx) => {
-        const y = startY + idx * lineHeight;
-        return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},serif" font-size="${fontSize}" font-weight="bold" fill="#3b2f2f">${escapeXml(line)}</text>`;
-      })
-      .join('');
 
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
@@ -176,13 +148,19 @@ export class WantedTemplate implements StickerTemplate {
         <!-- Header -->
         <text x="256" y="95" text-anchor="middle" font-family="${family},serif" font-size="64" font-weight="900" fill="#3b2f2f" letter-spacing="8">WANTED</text>
         <text x="256" y="145" text-anchor="middle" font-family="${family},serif" font-size="22" font-weight="bold" fill="#5c4033" letter-spacing="3">DEAD OR ALIVE</text>
-        ${bodyTexts}
         <!-- Footer Reward -->
         <text x="256" y="445" text-anchor="middle" font-family="${family},serif" font-size="28" font-weight="900" fill="#8b0000" letter-spacing="2">REWARD $1,000,000</text>
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg))
+      .composite([{
+        input: fitted.contentBuffer,
+        left: 40 + Math.round((432 - fitted.contentWidth) / 2),
+        top: 180 + Math.round((220 - fitted.contentHeight) / 2),
+      }])
+      .webp({ lossless: true, preset: 'text' })
+      .toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',
@@ -204,38 +182,36 @@ export class MinimalTemplate implements StickerTemplate {
     const family = getFontFamily(getDefaultFontPath());
 
     // Rendered pixel bounds (P1)
-    const fitted = await fitTextIntoRegionRendered({
+    const fitted = await renderFittedText({
       text: clean,
-      width: 432,
-      height: 240,
+      maxWidth: 432,
+      maxHeight: 240,
+      margin: 0,
       maxFontSize: 72,
       minFontSize: 14,
       color: '#f8fafc',
       outlineColor: 'transparent',
+      outlineWidth: 0,
       fontWeight: '500',
     });
-
-    const { lines, fontSize, lineHeight, totalHeight } = fitted;
-    const startY = 160 + Math.round((240 - totalHeight) / 2) + Math.round(fontSize * 0.85);
-
-    const bodyTexts = lines
-      .map((line, idx) => {
-        const y = startY + idx * lineHeight;
-        return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="500" fill="#f8fafc">${escapeXml(line)}</text>`;
-      })
-      .join('');
 
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
         <rect width="512" height="512" rx="40" fill="#0f172a"/>
         <rect x="36" y="36" width="440" height="440" rx="24" fill="none" stroke="#334155" stroke-width="2"/>
         <circle cx="256" cy="110" r="16" fill="#38bdf8" opacity="0.8"/>
-        ${bodyTexts}
         <line x1="180" y1="420" x2="332" y2="420" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
       </svg>
     `;
 
-    const buffer = await Sharp(Buffer.from(svg)).webp({ lossless: true, preset: 'text' }).toBuffer();
+    const buffer = await Sharp(Buffer.from(svg))
+      .composite([{
+        input: fitted.contentBuffer,
+        left: 40 + Math.round((432 - fitted.contentWidth) / 2),
+        top: 160 + Math.round((240 - fitted.contentHeight) / 2),
+      }])
+      .webp({ lossless: true, preset: 'text' })
+      .toBuffer();
     return {
       buffer,
       mimetype: 'image/webp',

@@ -76,6 +76,30 @@ describe('Sticker Templates', () => {
     }
   });
 
+  it('mempertahankan warna asli emoji pada isi semua template', async () => {
+    const regions: Record<string, [number, number]> = {
+      terminal: [120, 450],
+      breaking: [150, 450],
+      wanted: [180, 400],
+      minimal: [160, 400],
+    };
+    for (const name of ['terminal', 'breaking', 'wanted', 'minimal']) {
+      const result = await defaultTemplateRegistry.resolve(name).render({ text: 'kocak 😷' });
+      const { data, info } = await Sharp(result.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const [startY, endY] = regions[name];
+      let yellowEmojiPixels = 0;
+      for (let y = startY; y < endY; y++) {
+        for (let x = 30; x < 482; x++) {
+          const offset = (y * 512 + x) * info.channels;
+          if (data[offset] > 170 && data[offset + 1] > 110 && data[offset + 2] < 100 && data[offset + 3] > 32) {
+            yellowEmojiPixels++;
+          }
+        }
+      }
+      expect(yellowEmojiPixels, name).toBeGreaterThan(100);
+    }
+  });
+
   it('menolak teks yang melebihi kapasitas dengan controlled TEXT_TOO_LONG', async () => {
     const tpl = defaultTemplateRegistry.resolve('wanted');
     const excessivelyLong = 'Kata '.repeat(100);

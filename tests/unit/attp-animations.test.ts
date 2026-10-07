@@ -31,6 +31,24 @@ describe('ATTP Animation Presets & AttpGenerator', () => {
     expect(meta.height).toBe(512);
   }, 10000);
 
+  it('mempertahankan warna asli emoji pada frame animasi', async () => {
+    const result = await processor.process('kocak 😷', 'rainbow');
+    const { data, info } = await Sharp(result.buffer, { animated: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let yellowEmojiPixels = 0;
+    for (let y = 0; y < 512; y++) {
+      for (let x = 0; x < 512; x++) {
+        const offset = (y * 512 + x) * info.channels;
+        if (data[offset] > 170 && data[offset + 1] > 110 && data[offset + 2] < 100 && data[offset + 3] > 32) {
+          yellowEmojiPixels++;
+        }
+      }
+    }
+    expect(yellowEmojiPixels).toBeGreaterThan(100);
+  }, 10000);
+
   it('renders fade animated sticker', async () => {
     const result = await processor.process('Fade Text', 'fade');
     expect(result.mimetype).toBe('image/webp');

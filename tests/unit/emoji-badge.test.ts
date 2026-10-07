@@ -112,6 +112,21 @@ describe('BadgeGenerator', () => {
     expect(result.height).toBe(512);
   });
 
+  it('mempertahankan warna emoji di dalam label badge', async () => {
+    const result = await generator.process({ type: 'badge', text: 'OKE 😷' }, context);
+    const { data, info } = await Sharp(result.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let yellowEmojiPixels = 0;
+    for (let y = 210; y < 302; y++) {
+      for (let x = 130; x < 470; x++) {
+        const offset = (y * 512 + x) * info.channels;
+        if (data[offset] > 170 && data[offset + 1] > 110 && data[offset + 2] < 100 && data[offset + 3] > 32) {
+          yellowEmojiPixels++;
+        }
+      }
+    }
+    expect(yellowEmojiPixels).toBeGreaterThan(100);
+  });
+
   it('rejects empty badge text', () => {
     expect(() => generator.validate({ type: 'badge', text: '' }, context)).toThrow(
       /tidak boleh kosong/i

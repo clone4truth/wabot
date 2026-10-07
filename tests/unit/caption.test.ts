@@ -148,7 +148,7 @@ describe('CaptionGenerator', () => {
   });
 
   it('renders caption with emojis without crashing or clipping', async () => {
-    const emojiText = 'Foto bareng sahabat seru banget! 🎉✨🔥🏖️';
+    const emojiText = 'kocak 😷';
     const res = await generator.process(
       {
         type: 'caption',
@@ -161,6 +161,17 @@ describe('CaptionGenerator', () => {
 
     expect(res.width).toBe(512);
     expect(res.height).toBe(512);
+    const { data, info } = await Sharp(res.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let yellowEmojiPixels = 0;
+    for (let y = 350; y < 512; y++) {
+      for (let x = 0; x < 512; x++) {
+        const offset = (y * 512 + x) * info.channels;
+        if (data[offset] > 170 && data[offset + 1] > 110 && data[offset + 2] < 100 && data[offset + 3] > 32) {
+          yellowEmojiPixels++;
+        }
+      }
+    }
+    expect(yellowEmojiPixels).toBeGreaterThan(100);
   });
 
   it('renders caption with unbroken long token', async () => {

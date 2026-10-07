@@ -94,7 +94,7 @@ export class TextGenerator implements StickerGenerator {
     const resolved = await Promise.all(
       ids.map(async (id) => {
         const [savedName, info] = await Promise.all([
-          waha.getContactSavedName(id).catch(() => undefined),
+          waha.getContactSavedName(id, context.session).catch(() => undefined),
           waha.getChatInfo(id).catch(() => null),
         ]);
         return [id, { savedName, info }] as const;

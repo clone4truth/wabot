@@ -10,6 +10,7 @@ export interface TextLayoutOptions {
   maxWidth: number;
   maxHeight: number;
   fontSize?: number;
+  fontFamily?: string;
   fontWeight?: string;
   color?: string;
   outlineColor?: string;
@@ -57,7 +58,7 @@ export function calculateTextLayout(options: {
   const graphemes = splitGraphemes(text);
   let wideCount = 0;
   for (const g of graphemes) {
-    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(g)) {
+    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul})/u.test(g)) {
       wideCount++;
     }
   }
@@ -90,8 +91,10 @@ function buildTextLayer(
   outlineWidth: number,
   margin: number = 16,
   linesOverride?: string[],
+  fontFamily?: string,
+  fontWeight = 'bold',
 ): string {
-  const family = getFontFamily(getDefaultFontPath());
+  const family = fontFamily ?? getFontFamily(getDefaultFontPath());
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const ax = align === 'left' ? margin : align === 'right' ? maxWidth - margin : maxWidth / 2;
 
@@ -112,31 +115,11 @@ function buildTextLayer(
   const texts = lines
     .map((line, i) => {
       const y = startY + i * lh + Math.round(fontSize * 0.85);
-      return `<text x="${ax}" y="${y}" text-anchor="${anchor}" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
+      return `<text x="${ax}" y="${y}" text-anchor="${anchor}" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
     })
     .join('');
 
   return texts;
-}
-
-async function renderSingleLine(
-  text: string,
-  maxWidth: number,
-  maxHeight: number,
-  fontSize: number,
-  color: string,
-  align: 'left' | 'center' | 'right',
-  outlineColor: string,
-  outlineWidth: number,
-  margin: number = 16,
-): Promise<Buffer> {
-  const texts = buildTextLayer(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth, margin);
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}">` +
-    texts +
-    `</svg>`;
-
-  return Sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Buffer> {
@@ -152,12 +135,31 @@ export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Bu
     margin = 16,
   } = options as any;
 
-  return renderSingleLine(text, maxWidth, maxHeight, fontSize, color, align, outlineColor, outlineWidth, margin);
+  const fitted = await renderFittedText({
+    text,
+    maxWidth,
+    maxHeight,
+    minFontSize: fontSize,
+    maxFontSize: fontSize,
+    color,
+    align,
+    outlineColor,
+    outlineWidth,
+    margin,
+    fontFamily: options.fontFamily,
+    fontWeight: options.fontWeight,
+  });
+  return fitted.buffer;
 }
 
 export interface FittedTextResult {
   buffer: Buffer;
+  /** Tight transparent text layer, useful when compositing into another layout. */
+  contentBuffer: Buffer;
+  contentWidth: number;
+  contentHeight: number;
   fontSize: number;
+  lineHeight: number;
   lines: string[];
 }
 
@@ -200,15 +202,18 @@ async function renderPangoColorLines(
   outlineWidth: number,
   align: 'left' | 'center' | 'right',
   scale = 1,
+  fontFamily?: string,
+  fontWeight = 'bold',
 ): Promise<Buffer> {
-  const family = getFontFamily(getDefaultFontPath());
+  const family = fontFamily ?? getFontFamily(getDefaultFontPath());
   const pangoAlign = align === 'center' ? 'centre' : align;
   const scaledFont = Math.max(1, Math.round(fontSize * scale));
+  const weight = fontWeight === 'normal' ? 'Normal' : fontWeight === 'bold' ? 'Bold' : fontWeight;
   const markup = `<span foreground="${escapePangoMarkup(color)}">${lines.map(escapePangoMarkup).join('\n')}</span>`;
   const textImage = await Sharp({
     text: {
       text: markup,
-      font: `${family} Bold ${scaledFont}`,
+      font: `${family} ${weight} ${scaledFont}`,
       align: pangoAlign,
       spacing: Math.round(fontSize * 0.25 * scale),
       rgba: true,
@@ -255,6 +260,29 @@ async function renderPangoColorLines(
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     },
   }).composite(composites).png().toBuffer();
+}
+
+export async function renderTextLinesToBuffer(options: {
+  lines: string[];
+  fontSize: number;
+  color?: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+  align?: 'left' | 'center' | 'right';
+  fontFamily?: string;
+  fontWeight?: string;
+}): Promise<Buffer> {
+  return renderPangoColorLines(
+    options.lines,
+    options.fontSize,
+    options.color ?? '#ffffff',
+    options.outlineColor ?? '#000000',
+    options.outlineWidth ?? 2,
+    options.align ?? 'center',
+    1,
+    options.fontFamily,
+    options.fontWeight ?? 'bold',
+  );
 }
 
 async function placeTightTextOnCanvas(
@@ -351,73 +379,87 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
       }
 
       try {
-        if (colorEmoji) {
-          const tight = await renderPangoColorLines(
-            layout.lines,
-            size,
-            options.color ?? '#ffffff',
-            options.outlineColor ?? '#000000',
-            options.outlineWidth ?? 2,
-            align,
+        if (!colorEmoji) {
+          const textLayer = buildTextLayer(
+            text, maxWidth, maxHeight, size,
+            options.color ?? '#ffffff', align,
+            options.outlineColor ?? '#000000', options.outlineWidth ?? 2, margin, layout.lines,
+            options.fontFamily, options.fontWeight ?? 'bold',
           );
-          const measured = await Sharp(tight).metadata();
-          const renderWidth = measured.width || 0;
-          const renderHeight = measured.height || 0;
-          if (renderWidth <= safeW && renderHeight <= safeH) {
-            const scaledTight = outputScale === 1
-              ? tight
-              : await renderPangoColorLines(
-                  layout.lines,
-                  size,
-                  options.color ?? '#ffffff',
-                  options.outlineColor ?? '#000000',
-                  options.outlineWidth ?? 2,
-                  align,
-                  outputScale,
-                );
+          const measured = await measureRenderedTextLayer(textLayer, maxWidth, maxHeight, size);
+          if (measured.width <= safeW && measured.height <= safeH) {
+            const tightSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${measured.width}" height="${measured.height}" viewBox="0 0 ${measured.width} ${measured.height}"><g transform="translate(${-measured.left},${-measured.top})">${textLayer}</g></svg>`;
+            const contentBuffer = await Sharp(Buffer.from(tightSvg), { density: 72 * outputScale }).png().toBuffer();
+            const contentMeta = await Sharp(contentBuffer).metadata();
             const buffer = await placeTightTextOnCanvas(
-              scaledTight, maxWidth, maxHeight, margin, align, outputScale,
+              contentBuffer, maxWidth, maxHeight, margin, align, outputScale,
             );
-            logger.debug('Color text layout selected', {
+            return {
+              buffer,
+              contentBuffer,
+              contentWidth: contentMeta.width || Math.round(measured.width * outputScale),
+              contentHeight: contentMeta.height || Math.round(measured.height * outputScale),
               fontSize: size,
-              lineCount: layout.lines.length,
-              renderWidth,
-              renderHeight,
-              breakLongWords,
-            });
-            return { buffer, fontSize: size, lines: layout.lines };
+              lineHeight: layout.lineHeight,
+              lines: layout.lines,
+            };
           }
-          lastError = new Error(`rendered color text overflow (${renderWidth}x${renderHeight} > ${safeW}x${safeH}) at ${size}px`);
+          lastError = new Error(`rendered text overflow (${measured.width}x${measured.height} > ${safeW}x${safeH}) at ${size}px`);
           continue;
         }
 
-        const textLayer = buildTextLayer(
-          text, maxWidth, maxHeight, size,
-          options.color ?? '#ffffff', align,
-          options.outlineColor ?? '#000000', options.outlineWidth ?? 2, margin, layout.lines,
+        // Emoji-containing text uses Pango rgba:true. It keeps color emoji
+        // intact while applying the requested foreground to normal glyphs.
+        const tight = await renderPangoColorLines(
+          layout.lines,
+          size,
+          options.color ?? '#ffffff',
+          options.outlineColor ?? '#000000',
+          options.outlineWidth ?? 2,
+          align,
+          1,
+          options.fontFamily,
+          options.fontWeight ?? 'bold',
         );
-        // Measure the whole layer independently of the final SVG viewport. Trimming
-        // a clipped final raster cannot reveal glyphs that fell outside its canvas.
-        const measured = await measureRenderedTextLayer(textLayer, maxWidth, maxHeight, size);
-        if (measured.width <= safeW && measured.height <= safeH) {
-          const inkLeft = align === 'left' ? margin
-            : align === 'right' ? maxWidth - margin - measured.width
-            : Math.floor((maxWidth - measured.width) / 2);
-          const inkTop = Math.floor((maxHeight - measured.height) / 2);
-          const dx = inkLeft - measured.left;
-          const dy = inkTop - measured.top;
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}"><g transform="translate(${dx},${dy})">${textLayer}</g></svg>`;
-          const buffer = await Sharp(Buffer.from(svg), { density: 72 * outputScale }).png().toBuffer();
+        const measured = await Sharp(tight).metadata();
+        const renderWidth = measured.width || 0;
+        const renderHeight = measured.height || 0;
+        if (renderWidth <= safeW && renderHeight <= safeH) {
+          const scaledTight = outputScale === 1
+            ? tight
+            : await renderPangoColorLines(
+                layout.lines,
+                size,
+                options.color ?? '#ffffff',
+                options.outlineColor ?? '#000000',
+                options.outlineWidth ?? 2,
+                align,
+                outputScale,
+                options.fontFamily,
+                options.fontWeight ?? 'bold',
+              );
+          const scaledMeta = await Sharp(scaledTight).metadata();
+          const buffer = await placeTightTextOnCanvas(
+            scaledTight, maxWidth, maxHeight, margin, align, outputScale,
+          );
           logger.debug('Text layout selected', {
             fontSize: size,
             lineCount: layout.lines.length,
-            renderWidth: measured.width,
-            renderHeight: measured.height,
+            renderWidth,
+            renderHeight,
             breakLongWords,
           });
-          return { buffer, fontSize: size, lines: layout.lines };
+          return {
+            buffer,
+            contentBuffer: scaledTight,
+            contentWidth: scaledMeta.width || Math.round(renderWidth * outputScale),
+            contentHeight: scaledMeta.height || Math.round(renderHeight * outputScale),
+            fontSize: size,
+            lineHeight: layout.lineHeight,
+            lines: layout.lines,
+          };
         }
-        lastError = new Error(`rendered text overflow (${measured.width}x${measured.height} > ${safeW}x${safeH}) at ${size}px`);
+        lastError = new Error(`rendered text overflow (${renderWidth}x${renderHeight} > ${safeW}x${safeH}) at ${size}px`);
       } catch (err) {
         lastError = err;
       }
@@ -461,30 +503,34 @@ export function fitTextIntoRegion(options: FitTextRegionOptions): FittedRegionRe
   const graphemes = splitGraphemes(text);
   let wideCount = 0;
   for (const g of graphemes) {
-    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(g)) {
+    if (/(\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul})/u.test(g)) {
       wideCount++;
     }
   }
   const wideRatio = graphemes.length > 0 ? wideCount / graphemes.length : 0;
   const charWidthFactor = 0.65 + wideRatio * 0.55;
 
-  for (let size = maxFontSize; size >= minFontSize; size -= 2) {
-    const charsPerLine = options.maxCharsPerLine
-      ? options.maxCharsPerLine(size)
-      : Math.max(4, Math.floor(width / (size * charWidthFactor)));
+  // Keep words intact through the whole font-size search. Only the fallback
+  // phase may split an exceptionally long token that cannot fit at min size.
+  for (const breakLongWords of [false, true]) {
+    for (let size = maxFontSize; size >= minFontSize; size -= 2) {
+      const charsPerLine = options.maxCharsPerLine
+        ? options.maxCharsPerLine(size)
+        : Math.max(4, Math.floor(width / (size * charWidthFactor)));
 
-    // IMPORTANT: Never pass maxLines to wrapWords so NO content is silently discarded!
-    const lines = wrapWords(text, charsPerLine);
-    const lineHeight = Math.round(size * lineHeightFactor);
-    const totalHeight = lines.length * lineHeight;
+      // IMPORTANT: Never pass maxLines so NO content is silently discarded.
+      const lines = wrapWords(text, charsPerLine, undefined, breakLongWords);
+      const lineHeight = Math.round(size * lineHeightFactor);
+      const totalHeight = lines.length * lineHeight;
 
-    if (totalHeight <= height) {
-      return {
-        lines,
-        fontSize: size,
-        lineHeight,
-        totalHeight,
-      };
+      if (totalHeight <= height) {
+        return {
+          lines,
+          fontSize: size,
+          lineHeight,
+          totalHeight,
+        };
+      }
     }
   }
 
@@ -633,48 +679,52 @@ export async function fitTextIntoRegionRendered(
 
   let lastMeasure: { width: number; height: number } | null = null;
 
-  for (const size of fontSizeCandidates(maxFontSize, minFontSize, step)) {
-    // Stage 1: logical wrap (grapheme-aware) untuk kandidat baris.
-    let charsPerLine = Math.max(1, Math.floor(options.maxCharsPerLine
-      ? options.maxCharsPerLine(size)
-      : width / (size * 0.62)));
+  const wrappingStrategies = options.maxCharsPerLine ? [true] : [false, true];
+  for (const breakLongWords of wrappingStrategies) {
+    for (const size of fontSizeCandidates(maxFontSize, minFontSize, step)) {
+      // Stage 1: logical wrap (grapheme-aware) untuk kandidat baris.
+      let charsPerLine = Math.max(1, Math.floor(options.maxCharsPerLine
+        ? options.maxCharsPerLine(size)
+        : width / (size * 0.62)));
 
-    // A width estimate can undercount emoji/CJK/wide letters. Tighten wrapping
-    // first, keeping the larger font when the resulting full text still fits.
-    while (charsPerLine >= 1) {
-      const lines = wrapWords(text, charsPerLine);
-      const lineHeight = Math.round(size * lineHeightFactor);
-      const totalHeight = lines.length * lineHeight;
-      if (totalHeight > height) break;
+      // A width estimate can undercount emoji/CJK/wide letters. Tighten wrapping
+      // first, keeping the larger font when the resulting full text still fits.
+      while (charsPerLine >= 1) {
+        const lines = wrapWords(text, charsPerLine, undefined, breakLongWords);
+        const lineHeight = Math.round(size * lineHeightFactor);
+        const totalHeight = lines.length * lineHeight;
+        if (totalHeight > height) break;
 
-      const startY = Math.round(size * 0.85);
-      const textElements = renderLine
-        ? renderLine(lines, size, lineHeight)
-        : lines
-            .map((line, idx) => {
-              const y = startY + idx * lineHeight;
-              return `<text x="${canvasW / 2}" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${size}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
-            })
-            .join('');
+        const startY = Math.round(size * 0.85);
+        const textElements = renderLine
+          ? renderLine(lines, size, lineHeight)
+          : lines
+              .map((line, idx) => {
+                const y = startY + idx * lineHeight;
+                return `<text x="${canvasW / 2}" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${size}" font-weight="${fontWeight}" fill="${color}"${stroke}>${escapeXml(line)}</text>`;
+              })
+              .join('');
 
-      try {
-        const measured = await measureRenderedTextLayer(textElements, canvasW, canvasH, size);
-        lastMeasure = measured;
-        if (measured.width <= width && measured.height <= height) {
-          return {
-            lines,
-            fontSize: size,
-            lineHeight,
-            totalHeight,
-            renderedWidth: measured.width,
-            renderedHeight: measured.height,
-          };
+        try {
+          const measured = await measureRenderedTextLayer(textElements, canvasW, canvasH, size);
+          lastMeasure = measured;
+          if (measured.width <= width && measured.height <= height) {
+            return {
+              lines,
+              fontSize: size,
+              lineHeight,
+              totalHeight,
+              renderedWidth: measured.width,
+              renderedHeight: measured.height,
+            };
+          }
+          if (measured.width <= width || charsPerLine === 1) break;
+          if (!breakLongWords && lines.length === 1 && splitGraphemes(lines[0]).length > charsPerLine) break;
+          charsPerLine = Math.max(1, Math.min(charsPerLine - 1, Math.floor(charsPerLine * width / measured.width)));
+        } catch {
+          // Render/measurement failure — try a smaller font without hiding text.
+          break;
         }
-        if (measured.width <= width || charsPerLine === 1) break;
-        charsPerLine = Math.max(1, Math.min(charsPerLine - 1, Math.floor(charsPerLine * width / measured.width)));
-      } catch {
-        // Render/measurement failure — try a smaller font without hiding text.
-        break;
       }
     }
   }

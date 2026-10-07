@@ -27,7 +27,7 @@ vi.mock('../../src/media/downloader', () => ({
 }));
 
 describe('fitTextIntoRegionRendered: actual pixel bounds', () => {
-  it('wraps wide glyphs using their full unclipped width', async () => {
+  it('shrinks wide unbroken words before considering grapheme splitting', async () => {
     const text = 'W'.repeat(12);
     const fitted = await fitTextIntoRegionRendered({ text, width: 200, height: 200, maxFontSize: 30, minFontSize: 10 });
     const family = getFontFamily(getDefaultFontPath());
@@ -35,7 +35,8 @@ describe('fitTextIntoRegionRendered: actual pixel bounds', () => {
     const { info } = await Sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${layers}</svg>`)).trim().toBuffer({ resolveWithObject: true });
     expect(info.width).toBeLessThanOrEqual(200);
     expect(fitted.lines.join('')).toBe(text);
-    expect(fitted.fontSize).toBe(30);
+    expect(fitted.lines).toHaveLength(1);
+    expect(fitted.fontSize).toBeLessThan(30);
   });
 
   it('measures a complete custom terminal prefix before accepting a layout', async () => {
@@ -49,7 +50,6 @@ describe('fitTextIntoRegionRendered: actual pixel bounds', () => {
     // Previously the 432px measurement viewport clipped this 503px line and
     // reported only 391px, accepting a layout that lost the end of the text.
     expect(info.width).toBeLessThanOrEqual(432);
-    expect(fitted.lines.length).toBeGreaterThan(1);
     expect(fitted.lines.join('')).toBe(text);
   });
 

@@ -48,6 +48,23 @@ describe('Chat bubble renderer', () => {
     expect(isWebp(buf)).toBe(true);
   });
 
+  it('mempertahankan warna asli emoji pada isi bubble', async () => {
+    const buf = await renderChatBubbleToBuffer({
+      senderName: 'Budi', senderId: '1', text: 'kocak 😷', time: '12:34',
+    });
+    const { data, info } = await Sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let yellowEmojiPixels = 0;
+    for (let y = 0; y < 512; y++) {
+      for (let x = 0; x < 512; x++) {
+        const offset = (y * 512 + x) * info.channels;
+        if (data[offset] > 170 && data[offset + 1] > 110 && data[offset + 2] < 100 && data[offset + 3] > 32) {
+          yellowEmojiPixels++;
+        }
+      }
+    }
+    expect(yellowEmojiPixels).toBeGreaterThan(100);
+  });
+
   it('teks singkat tampil besar dan tetap berukuran 512 × 512', async () => {
     const buf = await renderChatBubbleToBuffer({ senderName: 'Budi', senderId: '1', text: 'halo', time: '12:34' });
     const metadata = await Sharp(buf).metadata();

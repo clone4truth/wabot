@@ -3,8 +3,8 @@ import { StickerGenerator, GeneratorInput, GeneratorContext } from './types';
 import { ProcessingResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { countGraphemes, sanitizeText, escapeXml } from '../rendering/text-utils';
-import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
+import { countGraphemes, sanitizeText } from '../rendering/text-utils';
+import { renderFittedText } from '../rendering/text-layout';
 
 interface BadgeTheme {
   bg: string;
@@ -84,13 +84,24 @@ export class BadgeGenerator implements StickerGenerator {
     const themeKey = clean.toLowerCase();
     const theme = BADGE_THEMES[themeKey] ?? DEFAULT_THEME;
 
-    const family = getFontFamily(getDefaultFontPath());
     const displayLabel = clean.toUpperCase();
 
     // Badge pill dimensions
     const badgeHeight = 110;
     const badgeY = Math.round((512 - badgeHeight) / 2);
-    const fontSize = clean.length > 12 ? 30 : 38;
+    const textRegionX = 130;
+    const textRegionWidth = 330;
+    const fitted = await renderFittedText({
+      text: displayLabel,
+      maxWidth: textRegionWidth,
+      maxHeight: 86,
+      margin: 4,
+      maxFontSize: clean.length > 12 ? 30 : 38,
+      minFontSize: 16,
+      color: theme.text,
+      outlineColor: 'transparent',
+      outlineWidth: 0,
+    });
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
       <defs>
@@ -103,13 +114,14 @@ export class BadgeGenerator implements StickerGenerator {
       <!-- Indicator Dot -->
       <circle cx="95" cy="${badgeY + Math.round(badgeHeight / 2)}" r="16" fill="${theme.dot}" />
       <circle cx="95" cy="${badgeY + Math.round(badgeHeight / 2)}" r="24" fill="none" stroke="${theme.dot}" stroke-width="3" opacity="0.4" />
-      <!-- Status Text -->
-      <text x="270" y="${badgeY + Math.round(badgeHeight / 2) + Math.round(fontSize * 0.35)}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="${theme.text}" letter-spacing="2">
-        ${escapeXml(displayLabel)}
-      </text>
     </svg>`;
 
     const buffer = await Sharp(Buffer.from(svg))
+      .composite([{
+        input: fitted.contentBuffer,
+        left: textRegionX + Math.round((textRegionWidth - fitted.contentWidth) / 2),
+        top: badgeY + Math.round((badgeHeight - fitted.contentHeight) / 2),
+      }])
       .webp({ quality: 90 })
       .toBuffer();
 

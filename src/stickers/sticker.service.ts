@@ -11,6 +11,7 @@ import { GeneratorRegistry, defaultGeneratorRegistry } from './generators/regist
 import { GeneratorContext, GeneratorInput } from './generators/types';
 import { JobManager, defaultJobManager, JobType } from './jobs/job-manager';
 import { hashIdentifier } from '../observability/privacy';
+import { resolveMentionDisplayNames } from '../whatsapp/mention-display';
 
 export class StickerService {
   private inputResolver = new InputResolver();
@@ -60,6 +61,8 @@ export class StickerService {
       options: input.options,
       content: input.content,
     };
+
+    await this.resolveMentionText(generatorInput, session);
 
     const context: GeneratorContext = {
       chatId,
@@ -115,6 +118,26 @@ export class StickerService {
       return 'background';
     }
     return 'image';
+  }
+
+  /** Resolve @number to @Display Name consistently for every text feature. */
+  private async resolveMentionText(input: GeneratorInput, session?: string): Promise<void> {
+    const content = input.content ?? {};
+    const fields = [
+      input.text,
+      content.text as string | undefined,
+      content.args as string | undefined,
+      content.quotedBody as string | undefined,
+    ];
+    if (!fields.some((value) => typeof value === 'string' && /@\d{7,20}/.test(value))) return;
+
+    const [text, contentText, args, quotedBody] = await resolveMentionDisplayNames(fields, {
+      getContactSavedName: (contactId) => this.wahaClient.getContactSavedName(contactId, session),
+    });
+    if (typeof input.text === 'string') input.text = text;
+    if (typeof content.text === 'string') content.text = contentText;
+    if (typeof content.args === 'string') content.args = args;
+    if (typeof content.quotedBody === 'string') content.quotedBody = quotedBody;
   }
 
   // Metadata pack WhatsApp (nama pack + emoji) untuk webp statis.

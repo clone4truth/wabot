@@ -141,6 +141,12 @@ describe('WAHAClient (format API resmi)', () => {
     expect(await client().getContactSavedName('1')).toBe('Kontak Tersimpan');
   });
 
+  it('getContactSavedName: memakai raw contactId dan session pesan', async () => {
+    expect(await client().getContactSavedName('68509711216870', 'session-grup')).toBe('Kontak Tersimpan');
+    const last = seen[seen.length - 1];
+    expect(last.url).toBe('/api/contacts?contactId=68509711216870&session=session-grup');
+  });
+
   it('getContactSavedName: fallback ke pushname lalu shortName', async () => {
     contactResponse = { id: '123@lid', name: '', pushname: 'Budi', shortName: 'Bud' };
     expect(await client().getContactSavedName('123@lid')).toBe('Budi');

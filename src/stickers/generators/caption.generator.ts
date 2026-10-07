@@ -7,9 +7,8 @@ import { ErrorCode } from '../../errors/error-codes';
 import { downloadMedia } from '../../media/downloader';
 import { validateImageContent } from '../../media/validator';
 import { cleanupTempFile } from '../../media/temp-files';
-import { escapeXml, validateText } from '../rendering/text-utils';
-import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
-import { fitTextIntoRegion, fitTextIntoRegionRendered, FittedRegionResult } from '../rendering/text-layout';
+import { validateText } from '../rendering/text-utils';
+import { fitTextIntoRegion, renderFittedText } from '../rendering/text-layout';
 
 export class CaptionGenerator implements StickerGenerator {
   readonly name = 'caption';
@@ -27,7 +26,7 @@ export class CaptionGenerator implements StickerGenerator {
     const clean = validateText(text, { emptyMessage: 'Teks caption tidak boleh kosong' });
 
     // Pre-check sinkron (logical) di validate; validasi bounds render aktual
-    // dijalankan di process() via fitTextIntoRegionRendered (Stage 2).
+    // dijalankan di process() via renderer Pango berbasis bounds piksel (Stage 2).
     fitTextIntoRegion({
       text: clean,
       width: 480,
@@ -56,16 +55,19 @@ export class CaptionGenerator implements StickerGenerator {
     const maxRegionH = 160;
     // Stage 1+2: logical wrap LALU ukur bounds piksel render aktual — menjamin
     // teks penuh ter-render tanpa clipping (CJK/emoji/wide glyphs termasuk).
-    const fitted = await fitTextIntoRegionRendered({
+    const fitted = await renderFittedText({
       text: clean,
-      width: 480,
-      height: maxRegionH,
+      maxWidth: 512,
+      maxHeight: maxRegionH,
+      margin: 16,
       maxFontSize: 56,
       minFontSize: 14,
-      outlineWidth: 1,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 2,
     });
 
-    const bannerHeight = Math.max(112, Math.min(192, fitted.totalHeight + 32));
+    const bannerHeight = Math.max(112, Math.min(192, fitted.contentHeight + 32));
     const imageHeight = 512 - bannerHeight;
 
     const { filePath } = await downloadMedia(mediaUrl);
@@ -75,15 +77,22 @@ export class CaptionGenerator implements StickerGenerator {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Invalid image content');
       }
 
-      const family = getFontFamily(getDefaultFontPath());
       let finalSharp: Sharp.Sharp;
+      const bannerMode = position === 'overlay' ? 'overlay' : position === 'top' ? 'top' : 'bottom';
+      const bannerSvg = this.renderBannerSvg(bannerHeight, bannerMode);
+      const bannerLayer = await Sharp(Buffer.from(bannerSvg))
+        .composite([{
+          input: fitted.contentBuffer,
+          left: Math.round((512 - fitted.contentWidth) / 2),
+          top: Math.round((bannerHeight - fitted.contentHeight) / 2),
+        }])
+        .png()
+        .toBuffer();
 
       if (position === 'top') {
         const resizedImage = await Sharp(filePath, sharpInputOptions())
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
-
-        const bannerSvg = this.renderBannerSvg(fitted, family, bannerHeight, 'top');
 
         finalSharp = Sharp({
           create: {
@@ -93,7 +102,7 @@ export class CaptionGenerator implements StickerGenerator {
             background: { r: 0, g: 0, b: 0, alpha: 0 },
           },
         }).composite([
-          { input: Buffer.from(bannerSvg), top: 0, left: 0 },
+          { input: bannerLayer, top: 0, left: 0 },
           { input: resizedImage, top: bannerHeight, left: 0 },
         ]);
       } else if (position === 'overlay') {
@@ -101,18 +110,14 @@ export class CaptionGenerator implements StickerGenerator {
           .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
-        const overlaySvg = this.renderBannerSvg(fitted, family, bannerHeight, 'overlay');
-
         finalSharp = Sharp(resizedImage).composite([
-          { input: Buffer.from(overlaySvg), top: 512 - bannerHeight, left: 0 },
+          { input: bannerLayer, top: 512 - bannerHeight, left: 0 },
         ]);
       } else {
         // default: bottom
         const resizedImage = await Sharp(filePath, sharpInputOptions())
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
-
-        const bannerSvg = this.renderBannerSvg(fitted, family, bannerHeight, 'bottom');
 
         finalSharp = Sharp({
           create: {
@@ -123,7 +128,7 @@ export class CaptionGenerator implements StickerGenerator {
           },
         }).composite([
           { input: resizedImage, top: 0, left: 0 },
-          { input: Buffer.from(bannerSvg), top: imageHeight, left: 0 },
+          { input: bannerLayer, top: imageHeight, left: 0 },
         ]);
       }
 
@@ -144,28 +149,15 @@ export class CaptionGenerator implements StickerGenerator {
   }
 
   private renderBannerSvg(
-    fitted: FittedRegionResult,
-    family: string,
     height: number,
     mode: 'top' | 'bottom' | 'overlay',
   ): string {
-    const { lines, fontSize, lineHeight, totalHeight } = fitted;
-    const startY = Math.round((height - totalHeight) / 2) + Math.round(fontSize * 0.85);
-
-    const textElements = lines
-      .map((line, idx) => {
-        const y = startY + idx * lineHeight;
-        return `<text x="256" y="${y}" text-anchor="middle" font-family="${family},sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff" stroke="#000000" stroke-width="2" paint-order="stroke">${escapeXml(line)}</text>`;
-      })
-      .join('');
-
     const bgRect = mode === 'overlay'
       ? `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.85"/></linearGradient></defs><rect width="512" height="${height}" fill="url(#g)"/>`
       : `<rect width="512" height="${height}" rx="16" fill="#0f172acc" stroke="#334155" stroke-width="2"/>`;
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="${height}" viewBox="0 0 512 ${height}">
       ${bgRect}
-      ${textElements}
     </svg>`;
   }
 }

@@ -182,12 +182,12 @@ export class WAHAClient {
 
   // Best-effort: nama kontak manusia. Prioritas nama tersimpan, lalu pushname
   // dan shortName. Nomor/ID mentah sengaja ditolak agar tidak masuk ke stiker.
-  async getContactSavedName(chatId: string): Promise<string | undefined> {
+  async getContactSavedName(chatId: string, session = this.session): Promise<string | undefined> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
     try {
       const res = await fetch(
-        `${this.baseUrl}/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(this.session)}`,
+        `${this.baseUrl}/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(session)}`,
         { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
       );
       if (!res.ok) {
