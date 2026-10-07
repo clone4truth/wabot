@@ -116,10 +116,17 @@ export function validateText(text: string, options: TextValidationOptions = {}):
 
 /**
  * Bungkus kata ke baris-baris berdasarkan maxChars (grapheme clusters).
- * Jika kata/token melebihi maxChars, token dipecah menjadi beberapa segmen tanpa data loss (tanpa …)
- * dan tanpa memecah sequence emoji multi-codepoint.
+ * Jika kata/token melebihi maxChars dan breakLongWords aktif, token dipecah
+ * menjadi beberapa segmen tanpa data loss (tanpa …) dan tanpa memecah sequence
+ * emoji multi-codepoint. Mode non-breaking dipakai saat pencarian layout agar
+ * font dikecilkan lebih dahulu sebelum kata terpaksa dipotong.
  */
-export function wrapWords(text: string, maxChars: number, maxLines?: number): string[] {
+export function wrapWords(
+  text: string,
+  maxChars: number,
+  maxLines?: number,
+  breakLongWords = true,
+): string[] {
   const words = String(text ?? '').split(/\s+/).filter(Boolean);
   if (words.length === 0) return [''];
 
@@ -129,7 +136,7 @@ export function wrapWords(text: string, maxChars: number, maxLines?: number): st
   for (const word of words) {
     const wordGraphemes = splitGraphemes(word);
 
-    if (wordGraphemes.length > maxChars) {
+    if (wordGraphemes.length > maxChars && breakLongWords) {
       if (currentGraphemes.length > 0) {
         lines.push(currentGraphemes.join(''));
         currentGraphemes = [];

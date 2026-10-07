@@ -1,7 +1,7 @@
 import { getDefaultFontPath, getFontFamily } from './fonts';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { escapeXml, wrapWords, splitGraphemes } from './text-utils';
+import { escapeXml, wrapWords, splitGraphemes, isEmojiGrapheme } from './text-utils';
 import Sharp from 'sharp';
 import { logger } from '../../observability/logger';
 
@@ -48,8 +48,9 @@ export function calculateTextLayout(options: {
   fontSize: number;
   margin?: number;
   maxLines?: number;
+  breakLongWords?: boolean;
 }): TextLayoutMetrics {
-  const { text, maxWidth, fontSize, margin = 16, maxLines } = options;
+  const { text, maxWidth, fontSize, margin = 16, maxLines, breakLongWords = true } = options;
   const safeWidth = Math.max(20, maxWidth - margin * 2);
 
   // Deteksi rasio emoji/karakter lebar dalam teks untuk menyesuaikan estimasi maxCharsPerLine
@@ -65,7 +66,7 @@ export function calculateTextLayout(options: {
   const charWidthFactor = 0.74 + wideRatio * 0.56;
   const maxCharsPerLine = Math.max(4, Math.floor(safeWidth / (fontSize * charWidthFactor)));
 
-  const lines = wrapWords(text, maxCharsPerLine, maxLines);
+  const lines = wrapWords(text, maxCharsPerLine, maxLines, breakLongWords);
   const lineHeight = Math.round(fontSize * 1.25);
   const totalHeight = lines.length * lineHeight;
 
@@ -88,12 +89,20 @@ function buildTextLayer(
   outlineColor: string,
   outlineWidth: number,
   margin: number = 16,
+  linesOverride?: string[],
 ): string {
   const family = getFontFamily(getDefaultFontPath());
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const ax = align === 'left' ? margin : align === 'right' ? maxWidth - margin : maxWidth / 2;
 
-  const layout = calculateTextLayout({ text, maxWidth, fontSize, margin });
+  const calculated = calculateTextLayout({ text, maxWidth, fontSize, margin });
+  const layout = linesOverride
+    ? {
+        ...calculated,
+        lines: linesOverride,
+        totalHeight: linesOverride.length * calculated.lineHeight,
+      }
+    : calculated;
   const { lines, lineHeight: lh, totalHeight: totalH } = layout;
   const startY = Math.max(0, Math.round((maxHeight - totalH) / 2));
   const stroke = outlineWidth > 0 && outlineColor !== 'transparent'
@@ -149,6 +158,128 @@ export async function renderTextToBuffer(options: TextLayoutOptions): Promise<Bu
 export interface FittedTextResult {
   buffer: Buffer;
   fontSize: number;
+  lines: string[];
+}
+
+function containsEmoji(text: string): boolean {
+  return splitGraphemes(text).some(isEmojiGrapheme);
+}
+
+function parseHexColor(color: string): { r: number; g: number; b: number; alpha: number } {
+  const normalized = color.trim();
+  const short = /^#([0-9a-f]{3})$/i.exec(normalized);
+  if (short) {
+    return {
+      r: parseInt(short[1][0] + short[1][0], 16),
+      g: parseInt(short[1][1] + short[1][1], 16),
+      b: parseInt(short[1][2] + short[1][2], 16),
+      alpha: 1,
+    };
+  }
+  const full = /^#([0-9a-f]{6})$/i.exec(normalized);
+  if (full) {
+    return {
+      r: parseInt(full[1].slice(0, 2), 16),
+      g: parseInt(full[1].slice(2, 4), 16),
+      b: parseInt(full[1].slice(4, 6), 16),
+      alpha: 1,
+    };
+  }
+  return { r: 0, g: 0, b: 0, alpha: 1 };
+}
+
+/**
+ * Pango dengan rgba:true mempertahankan glyph emoji berwarna di dalam teks.
+ * Outline dibuat dari siluet alpha agar huruf tetap terbaca tanpa mewarnai emoji.
+ */
+async function renderPangoColorLines(
+  lines: string[],
+  fontSize: number,
+  color: string,
+  outlineColor: string,
+  outlineWidth: number,
+  align: 'left' | 'center' | 'right',
+  scale = 1,
+): Promise<Buffer> {
+  const family = getFontFamily(getDefaultFontPath());
+  const pangoAlign = align === 'center' ? 'centre' : align;
+  const scaledFont = Math.max(1, Math.round(fontSize * scale));
+  const markup = `<span foreground="${escapePangoMarkup(color)}">${lines.map(escapePangoMarkup).join('\n')}</span>`;
+  const textImage = await Sharp({
+    text: {
+      text: markup,
+      font: `${family} Bold ${scaledFont}`,
+      align: pangoAlign,
+      spacing: Math.round(fontSize * 0.25 * scale),
+      rgba: true,
+    },
+  }).png().toBuffer();
+
+  const meta = await Sharp(textImage).metadata();
+  const width = meta.width || 1;
+  const height = meta.height || 1;
+  const radius = outlineWidth > 0 && outlineColor !== 'transparent'
+    ? Math.max(1, Math.round(outlineWidth * scale))
+    : 0;
+  if (radius === 0) return textImage;
+
+  const alphaMask = await Sharp(textImage).ensureAlpha().extractChannel(3).png().toBuffer();
+  const silhouette = await Sharp({
+    create: { width, height, channels: 4, background: parseHexColor(outlineColor) },
+  })
+    .composite([{ input: alphaMask, blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+
+  const composites: Sharp.OverlayOptions[] = [];
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (dx * dx + dy * dy > radius * radius) continue;
+      composites.push({ input: silhouette, left: radius + dx, top: radius + dy });
+    }
+  }
+  composites.push({ input: textImage, left: radius, top: radius });
+
+  return Sharp({
+    create: {
+      width: width + radius * 2,
+      height: height + radius * 2,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  }).composite(composites).png().toBuffer();
+}
+
+async function placeTightTextOnCanvas(
+  textImage: Buffer,
+  maxWidth: number,
+  maxHeight: number,
+  margin: number,
+  align: 'left' | 'center' | 'right',
+  scale: number,
+): Promise<Buffer> {
+  const canvasWidth = Math.round(maxWidth * scale);
+  const canvasHeight = Math.round(maxHeight * scale);
+  const scaledMargin = Math.round(margin * scale);
+  const meta = await Sharp(textImage).metadata();
+  const width = meta.width || 1;
+  const height = meta.height || 1;
+  const left = align === 'left'
+    ? scaledMargin
+    : align === 'right'
+      ? canvasWidth - scaledMargin - width
+      : Math.round((canvasWidth - width) / 2);
+  const top = Math.round((canvasHeight - height) / 2);
+
+  return Sharp({
+    create: {
+      width: canvasWidth,
+      height: canvasHeight,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  }).composite([{ input: textImage, left, top }]).png().toBuffer();
 }
 
 function* fontSizeCandidates(max: number, min: number, step: number): Generator<number> {
@@ -176,56 +307,114 @@ export async function renderFittedText(options: FittedTextOptions): Promise<Fitt
   } = options;
   const safeW = maxWidth - margin * 2;
   const safeH = maxHeight - margin * 2;
+  const align = options.align ?? 'center';
+  const colorEmoji = containsEmoji(text);
+  const minLayout = calculateTextLayout({
+    text,
+    maxWidth,
+    fontSize: minFontSize,
+    margin,
+  });
+  const hasTokenTooLongAtMinimum = String(text ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((word) => splitGraphemes(word).length > minLayout.maxCharsPerLine);
+  const wrappingStrategies = hasTokenTooLongAtMinimum ? [true] : [false, true];
 
   if (!Number.isFinite(outputScale) || outputScale <= 0) {
     throw new RangeError('outputScale must be a positive finite number');
   }
 
   let lastError: unknown = null;
-  for (const size of fontSizeCandidates(maxFontSize, minFontSize, 4)) {
-    const layout = calculateTextLayout({
-      text,
-      maxWidth,
-      fontSize: size,
-      margin,
-    });
+  // Fase pertama menjaga setiap kata utuh dan mengecilkan font bila perlu.
+  // Hanya bila semua ukuran gagal, fase kedua boleh memecah token ekstrem.
+  for (const breakLongWords of wrappingStrategies) {
+    for (const size of fontSizeCandidates(maxFontSize, minFontSize, 4)) {
+      const layout = calculateTextLayout({
+        text,
+        maxWidth,
+        fontSize: size,
+        margin,
+        breakLongWords,
+      });
 
-    // Level 1: Logical bounds check sebelum render
-    if (layout.totalHeight > safeH) {
-      lastError = new Error(`logical layout overflow (${layout.totalHeight}px > ${safeH}px) at ${size}px`);
-      continue;
-    }
-
-    try {
-      const textLayer = buildTextLayer(
-        text, maxWidth, maxHeight, size,
-        options.color ?? '#ffffff', options.align ?? 'center',
-        options.outlineColor ?? '#000000', options.outlineWidth ?? 2, margin,
-      );
-      // Measure the whole layer independently of the final SVG viewport. Trimming
-      // a clipped final raster cannot reveal glyphs that fell outside its canvas.
-      const measured = await measureRenderedTextLayer(textLayer, maxWidth, maxHeight, size);
-      if (measured.width <= safeW && measured.height <= safeH) {
-        const align = options.align ?? 'center';
-        const inkLeft = align === 'left' ? margin
-          : align === 'right' ? maxWidth - margin - measured.width
-          : Math.floor((maxWidth - measured.width) / 2);
-        const inkTop = Math.floor((maxHeight - measured.height) / 2);
-        const dx = inkLeft - measured.left;
-        const dy = inkTop - measured.top;
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}"><g transform="translate(${dx},${dy})">${textLayer}</g></svg>`;
-        const buffer = await Sharp(Buffer.from(svg), { density: 72 * outputScale }).png().toBuffer();
-        logger.debug('Text layout selected', {
-          fontSize: size,
-          lineCount: layout.lines.length,
-          renderWidth: measured.width,
-          renderHeight: measured.height,
-        });
-        return { buffer, fontSize: size };
+      // Level 1: Logical bounds check sebelum render
+      if (layout.totalHeight > safeH) {
+        lastError = new Error(`logical layout overflow (${layout.totalHeight}px > ${safeH}px) at ${size}px`);
+        continue;
       }
-      lastError = new Error(`rendered text overflow (${measured.width}x${measured.height} > ${safeW}x${safeH}) at ${size}px`);
-    } catch (err) {
-      lastError = err;
+
+      try {
+        if (colorEmoji) {
+          const tight = await renderPangoColorLines(
+            layout.lines,
+            size,
+            options.color ?? '#ffffff',
+            options.outlineColor ?? '#000000',
+            options.outlineWidth ?? 2,
+            align,
+          );
+          const measured = await Sharp(tight).metadata();
+          const renderWidth = measured.width || 0;
+          const renderHeight = measured.height || 0;
+          if (renderWidth <= safeW && renderHeight <= safeH) {
+            const scaledTight = outputScale === 1
+              ? tight
+              : await renderPangoColorLines(
+                  layout.lines,
+                  size,
+                  options.color ?? '#ffffff',
+                  options.outlineColor ?? '#000000',
+                  options.outlineWidth ?? 2,
+                  align,
+                  outputScale,
+                );
+            const buffer = await placeTightTextOnCanvas(
+              scaledTight, maxWidth, maxHeight, margin, align, outputScale,
+            );
+            logger.debug('Color text layout selected', {
+              fontSize: size,
+              lineCount: layout.lines.length,
+              renderWidth,
+              renderHeight,
+              breakLongWords,
+            });
+            return { buffer, fontSize: size, lines: layout.lines };
+          }
+          lastError = new Error(`rendered color text overflow (${renderWidth}x${renderHeight} > ${safeW}x${safeH}) at ${size}px`);
+          continue;
+        }
+
+        const textLayer = buildTextLayer(
+          text, maxWidth, maxHeight, size,
+          options.color ?? '#ffffff', align,
+          options.outlineColor ?? '#000000', options.outlineWidth ?? 2, margin, layout.lines,
+        );
+        // Measure the whole layer independently of the final SVG viewport. Trimming
+        // a clipped final raster cannot reveal glyphs that fell outside its canvas.
+        const measured = await measureRenderedTextLayer(textLayer, maxWidth, maxHeight, size);
+        if (measured.width <= safeW && measured.height <= safeH) {
+          const inkLeft = align === 'left' ? margin
+            : align === 'right' ? maxWidth - margin - measured.width
+            : Math.floor((maxWidth - measured.width) / 2);
+          const inkTop = Math.floor((maxHeight - measured.height) / 2);
+          const dx = inkLeft - measured.left;
+          const dy = inkTop - measured.top;
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxWidth}" height="${maxHeight}" viewBox="0 0 ${maxWidth} ${maxHeight}"><g transform="translate(${dx},${dy})">${textLayer}</g></svg>`;
+          const buffer = await Sharp(Buffer.from(svg), { density: 72 * outputScale }).png().toBuffer();
+          logger.debug('Text layout selected', {
+            fontSize: size,
+            lineCount: layout.lines.length,
+            renderWidth: measured.width,
+            renderHeight: measured.height,
+            breakLongWords,
+          });
+          return { buffer, fontSize: size, lines: layout.lines };
+        }
+        lastError = new Error(`rendered text overflow (${measured.width}x${measured.height} > ${safeW}x${safeH}) at ${size}px`);
+      } catch (err) {
+        lastError = err;
+      }
     }
   }
 

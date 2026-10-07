@@ -160,6 +160,55 @@ describe('Adaptive fitted layout (ukur render aktual)', () => {
 });
 
 describe('Unicode + emoji', () => {
+  it('menjaga kata tetap utuh dan mempertahankan warna emoji pada teks campuran', async () => {
+    const fitted = await renderFittedText({
+      text: 'kocak 😷',
+      maxWidth: 512,
+      maxHeight: 512,
+      margin: 16,
+      maxFontSize: 144,
+      minFontSize: 18,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 2,
+    });
+
+    expect(fitted.lines.flatMap((line) => line.split(/\s+/))).toEqual(['kocak', '😷']);
+
+    const { data, info } = await Sharp(fitted.buffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let coloredPixels = 0;
+    let left = info.width;
+    let right = -1;
+    let top = info.height;
+    let bottom = -1;
+    for (let y = 0; y < info.height; y++) {
+      for (let x = 0; x < info.width; x++) {
+        const offset = (y * info.width + x) * info.channels;
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        const alpha = data[offset + 3];
+        if (alpha === 0) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+        if (alpha > 32 && Math.max(red, green, blue) - Math.min(red, green, blue) > 20) {
+          coloredPixels++;
+        }
+      }
+    }
+
+    expect(coloredPixels).toBeGreaterThan(1_000);
+    expect(left).toBeGreaterThanOrEqual(16);
+    expect(right).toBeLessThanOrEqual(495);
+    expect(top).toBeGreaterThanOrEqual(16);
+    expect(bottom).toBeLessThanOrEqual(495);
+  });
+
   it('render tanpa crash (fallback font environment)', async () => {
     const fitted = await renderFittedText({ text: 'Halo 😂🔥 Semangat 💪 Indonesia 🇮🇩', maxWidth: 512, maxHeight: 512 });
     expect(fitted.buffer.length).toBeGreaterThan(1000);
