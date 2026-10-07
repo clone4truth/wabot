@@ -34,6 +34,27 @@ describe('EmojiGenerator', () => {
     expect(result.animated).toBe(false);
   });
 
+  it('mempertahankan warna asli emoji, bukan glyph monokrom', async () => {
+    const result = await generator.process({ type: 'emoji', text: '😂' }, context);
+    const { data } = await Sharp(result.buffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    let coloredPixels = 0;
+    for (let offset = 0; offset < data.length; offset += 4) {
+      const red = data[offset];
+      const green = data[offset + 1];
+      const blue = data[offset + 2];
+      const alpha = data[offset + 3];
+      if (alpha > 32 && Math.max(red, green, blue) - Math.min(red, green, blue) > 20) {
+        coloredPixels++;
+      }
+    }
+
+    expect(coloredPixels).toBeGreaterThan(1_000);
+  });
+
   it('generates sticker for complex emoji (flag & ZWJ)', async () => {
     const resultFlag = await generator.process({ type: 'emoji', text: '🇮🇩' }, context);
     expect(resultFlag.width).toBe(512);

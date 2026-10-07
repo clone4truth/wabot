@@ -6,6 +6,7 @@ import { logger } from '../observability/logger';
 import { hashIdentifier } from '../observability/privacy';
 import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
 import { discardResponseBody } from '../media/http-body';
+import { firstHumanDisplayName } from './display-name';
 
 /**
  * Response resmi WAHA untuk GET /api/{session}/chats/{chatId}/picture
@@ -179,7 +180,8 @@ export class WAHAClient {
     }
   }
 
-  // Best-effort: nama kontak yang TERSIMPAN di HP pemilik session (bukan pushName).
+  // Best-effort: nama kontak manusia. Prioritas nama tersimpan, lalu pushname
+  // dan shortName. Nomor/ID mentah sengaja ditolak agar tidak masuk ke stiker.
   async getContactSavedName(chatId: string): Promise<string | undefined> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
@@ -193,7 +195,7 @@ export class WAHAClient {
         return undefined;
       }
       const data = (await res.json()) as any;
-      return this.cleanName(data?.name);
+      return firstHumanDisplayName([data?.name, data?.pushname, data?.pushName, data?.shortName]);
     } catch {
       return undefined;
     } finally {
@@ -253,10 +255,7 @@ export class WAHAClient {
   }
 
   private cleanName(name: unknown): string | undefined {
-    if (typeof name !== 'string') return undefined;
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === '~') return undefined;
-    return trimmed.slice(0, 32);
+    return firstHumanDisplayName([name]);
   }
 
   // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.

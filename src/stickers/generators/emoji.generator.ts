@@ -3,8 +3,7 @@ import { StickerGenerator, GeneratorInput, GeneratorContext } from './types';
 import { ProcessingResult } from '../result';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
-import { splitGraphemes, sanitizeText, escapeXml, isEmojiGrapheme } from '../rendering/text-utils';
-import { getDefaultFontPath, getFontFamily } from '../rendering/fonts';
+import { splitGraphemes, sanitizeText, isEmojiGrapheme } from '../rendering/text-utils';
 
 export class EmojiGenerator implements StickerGenerator {
   readonly name = 'emoji';
@@ -41,28 +40,34 @@ export class EmojiGenerator implements StickerGenerator {
       throw new AppError(ErrorCode.INVALID_ARGUMENT, '❌ Command !emoji hanya menerima karakter emoji yang valid');
     }
 
-    let fontSize = 240;
-    let y = 340;
+    // SVG/libRSVG merender font emoji sebagai glyph satu warna. Input `text`
+    // milik Sharp memakai Pango; `rgba: true` mempertahankan bitmap warna dari
+    // Noto Color Emoji. Render besar dahulu, lalu fit agar 1-4 emoji tidak clip.
+    const coloredEmoji = await Sharp({
+      text: {
+        text: clean,
+        font: 'Noto Color Emoji 384',
+        rgba: true,
+      },
+    })
+      .resize(456, 456, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
 
-    if (count === 2) {
-      fontSize = 170;
-      y = 320;
-    } else if (count >= 3) {
-      fontSize = 120;
-      y = 300;
-    }
+    const emojiMeta = await Sharp(coloredEmoji).metadata();
+    const left = Math.max(0, Math.round((512 - (emojiMeta.width || 0)) / 2));
+    const top = Math.max(0, Math.round((512 - (emojiMeta.height || 0)) / 2));
 
-    const defaultFamily = getFontFamily(getDefaultFontPath());
-    const fontFamily = `${defaultFamily}, 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif`;
-
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <text x="256" y="${y}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}">
-        ${escapeXml(clean)}
-      </text>
-    </svg>`;
-
-    const buffer = await Sharp(Buffer.from(svg))
-      .webp({ quality: 90 })
+    const buffer = await Sharp({
+      create: {
+        width: 512,
+        height: 512,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite([{ input: coloredEmoji, left, top }])
+      .webp({ quality: 90, alphaQuality: 100 })
       .toBuffer();
 
     const meta = await Sharp(buffer).metadata();

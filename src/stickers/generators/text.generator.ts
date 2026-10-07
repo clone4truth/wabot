@@ -3,6 +3,12 @@ import { ProcessingResult } from '../result';
 import { TextStickerProcessor } from '../processors/text.processor';
 import { QuoteProcessor } from '../processors/quote.processor';
 import { BubbleProcessor } from '../processors/bubble.processor';
+import { firstHumanDisplayName } from '../../whatsapp/display-name';
+
+interface ResolvedPerson {
+  savedName?: string;
+  info?: { name?: string; picture?: string } | null;
+}
 
 export class TextGenerator implements StickerGenerator {
   readonly name = 'text';
@@ -23,7 +29,12 @@ export class TextGenerator implements StickerGenerator {
     const modifier = input.modifier;
 
     if (modifier === 'quote') {
-      const senderName = (content.senderName as string) ?? context.senderName;
+      const senderId = (content.senderId as string) ?? context.senderId;
+      const person = await this.resolvePeople([senderId], context).then((people) => people.get(senderId));
+      const senderName = firstHumanDisplayName(
+        [person?.savedName, person?.info?.name, content.senderName, context.senderName],
+        'Pengguna WhatsApp',
+      );
       return this.quoteProcessor.process(text, senderName);
     }
 
@@ -39,29 +50,21 @@ export class TextGenerator implements StickerGenerator {
     const senderId = (content.senderId as string) ?? context.senderId;
     const quotedSenderId = content.quotedSenderId as string | undefined;
 
-    const ids = [...new Set([senderId, quotedSenderId].filter(Boolean))] as string[];
-    let byId = new Map<string, any>();
-
-    if (waha && ids.length > 0) {
-      const resolved = await Promise.all(
-        ids.map(async (id) => {
-          const [savedName, info] = await Promise.all([
-            waha.getContactSavedName(id).catch(() => undefined),
-            waha.getChatInfo(id).catch(() => null),
-          ]);
-          return { id, savedName, info };
-        }),
-      );
-      byId = new Map(resolved.map((r) => [r.id, r]));
-    }
+    const byId = await this.resolvePeople([senderId, quotedSenderId], context);
 
     const sender = senderId ? byId.get(senderId) : undefined;
     const quotedRes = quotedSenderId ? byId.get(quotedSenderId) : undefined;
 
-    const senderName = sender?.savedName || sender?.info?.name || (content.senderName as string) || context.senderName;
+    const senderName = firstHumanDisplayName(
+      [sender?.savedName, sender?.info?.name, content.senderName, context.senderName],
+      'Pengguna WhatsApp',
+    );
     const quoted = content.quotedBody
       ? {
-          senderName: quotedRes?.savedName || quotedRes?.info?.name || (content.quotedSenderName as string) || '?',
+          senderName: firstHumanDisplayName(
+            [quotedRes?.savedName, quotedRes?.info?.name, content.quotedSenderName],
+            'Pengguna WhatsApp',
+          )!,
           senderId: quotedSenderId,
           body: content.quotedBody as string,
         }
@@ -78,5 +81,25 @@ export class TextGenerator implements StickerGenerator {
     }
 
     return this.bubbleProcessor.process(text, senderName, senderId, quoted, avatar);
+  }
+
+  private async resolvePeople(
+    rawIds: Array<string | undefined>,
+    context: GeneratorContext,
+  ): Promise<Map<string, ResolvedPerson>> {
+    const waha = context.wahaClient;
+    const ids = [...new Set(rawIds.filter(Boolean))] as string[];
+    if (!waha || ids.length === 0) return new Map();
+
+    const resolved = await Promise.all(
+      ids.map(async (id) => {
+        const [savedName, info] = await Promise.all([
+          waha.getContactSavedName(id).catch(() => undefined),
+          waha.getChatInfo(id).catch(() => null),
+        ]);
+        return [id, { savedName, info }] as const;
+      }),
+    );
+    return new Map(resolved);
   }
 }

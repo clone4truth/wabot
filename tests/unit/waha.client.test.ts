@@ -11,6 +11,11 @@ describe('WAHAClient (format API resmi)', () => {
   let baseUrl: string;
   const seen: { method?: string; url?: string; body: any }[] = [];
   let failNext = 0;
+  let contactResponse: Record<string, unknown> = {
+    id: '1',
+    name: 'Kontak Tersimpan',
+    pushname: 'nick',
+  };
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
@@ -31,7 +36,7 @@ describe('WAHAClient (format API resmi)', () => {
         }
         if (req.url?.startsWith('/api/contacts?')) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ id: '1', name: 'Kontak Tersimpan', pushname: 'nick' }));
+          res.end(JSON.stringify(contactResponse));
           return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -134,6 +139,22 @@ describe('WAHAClient (format API resmi)', () => {
 
   it('getContactSavedName: name tersimpan, bukan pushname', async () => {
     expect(await client().getContactSavedName('1')).toBe('Kontak Tersimpan');
+  });
+
+  it('getContactSavedName: fallback ke pushname lalu shortName', async () => {
+    contactResponse = { id: '123@lid', name: '', pushname: 'Budi', shortName: 'Bud' };
+    expect(await client().getContactSavedName('123@lid')).toBe('Budi');
+
+    contactResponse = { id: '123@lid', name: '', pushname: '', shortName: 'Bud' };
+    expect(await client().getContactSavedName('123@lid')).toBe('Bud');
+
+    contactResponse = { id: '1', name: 'Kontak Tersimpan', pushname: 'nick' };
+  });
+
+  it('getContactSavedName: tidak menganggap nomor atau ID sebagai nama', async () => {
+    contactResponse = { id: '628123@lid', name: '628123@lid', pushname: '+62 812-3456' };
+    expect(await client().getContactSavedName('628123@lid')).toBeUndefined();
+    contactResponse = { id: '1', name: 'Kontak Tersimpan', pushname: 'nick' };
   });
 
   it('getChatInfo null saat 404', async () => {
