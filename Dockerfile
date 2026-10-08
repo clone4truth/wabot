@@ -16,6 +16,7 @@ COPY vitest.config.ts ./
 RUN npm ci
 
 COPY src ./src
+COPY assets ./assets
 COPY tests ./tests
 RUN npm run build
 
@@ -53,6 +54,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/assets ./assets
 COPY --from=dashboard-builder /app/dashboard-dist ./dashboard-dist
 
 EXPOSE 3000

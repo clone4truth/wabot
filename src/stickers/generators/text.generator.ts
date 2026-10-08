@@ -4,10 +4,28 @@ import { TextStickerProcessor } from '../processors/text.processor';
 import { QuoteProcessor } from '../processors/quote.processor';
 import { BubbleProcessor } from '../processors/bubble.processor';
 import { firstHumanDisplayName } from '../../whatsapp/display-name';
+import { formatMessageTime, normalizeMessageTimestamp } from '../../whatsapp/message-time';
+import { WahaLookupOptions } from '../../whatsapp/waha.client';
+import env from '../../config/env';
+import { AppError } from '../../errors/app-error';
+import { ErrorCode } from '../../errors/error-codes';
 
 interface ResolvedPerson {
   savedName?: string;
   info?: { name?: string; picture?: string } | null;
+}
+
+function optionalLookup<T>(request: () => Promise<T>, signal: AbortSignal | undefined, fallback: T): Promise<T> {
+  if (signal?.aborted) return Promise.resolve(fallback);
+  return new Promise((resolve) => {
+    const onAbort = () => finish(fallback);
+    const finish = (value: T) => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve(value);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve().then(() => signal?.aborted ? fallback : request()).then(finish, () => finish(fallback));
+  });
 }
 
 export class TextGenerator implements StickerGenerator {
@@ -39,53 +57,98 @@ export class TextGenerator implements StickerGenerator {
     }
 
     if (modifier === 'bubble') {
-      return this.processBubble(content, context, text);
+      return this.processBubble(content, context, text, input);
     }
 
     return this.plainTextProcessor.process(text);
   }
 
-  private async processBubble(content: Record<string, unknown>, context: GeneratorContext, text: string) {
-    const waha = context.wahaClient;
-    const senderId = (content.senderId as string) ?? context.senderId;
-    const quotedSenderId = content.quotedSenderId as string | undefined;
+  private async processBubble(content: Record<string, unknown>, context: GeneratorContext, text: string, input: GeneratorInput) {
+    const timeoutMs = input.timeoutMs ?? env.textProcessingTimeoutMs;
+    const deadlineAt = Date.now() + timeoutMs;
+    const controller = new AbortController();
+    // Metadata/avatar are optional. Leave time for measured text and WebP output.
+    const enrichmentMs = Math.max(0, timeoutMs - 750);
+    const timer = setTimeout(() => controller.abort(), enrichmentMs);
+    if (enrichmentMs === 0) controller.abort();
+    const signal = input.signal ? AbortSignal.any([controller.signal, input.signal]) : controller.signal;
+    const lookupOptions = { signal, timeoutMs: enrichmentMs };
+    const throwIfCancelled = () => {
+      if (input.signal?.aborted || Date.now() >= deadlineAt) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan atau waktu pemrosesan habis');
+      }
+    };
+    try {
+      throwIfCancelled();
+      const waha = context.wahaClient;
+      // A bubble is viewed from the user who requested it, rather than the bot.
+      // Current command text is authored by that user, even if an engine uses
+      // different identifier formats in its metadata. For replies, only an
+      // exact known author match is sufficient to identify an outgoing bubble.
+      const direction = content.timestampSource === 'current' || content.senderId === context.senderId
+        ? 'outgoing'
+        : 'incoming';
+      const showSenderName = direction === 'incoming' && context.isGroup !== false;
+      const senderId = (content.senderId as string | undefined) ??
+        (content.timestampSource === 'reply' ? undefined : context.senderId);
+      const quotedSenderId = content.quotedSenderId as string | undefined;
+      const [byId, time] = await Promise.all([
+        this.resolvePeople([showSenderName ? senderId : undefined, quotedSenderId], context, lookupOptions),
+        this.resolveBubbleTime(content, context, lookupOptions),
+      ]);
 
-    const byId = await this.resolvePeople([senderId, quotedSenderId], context);
+      const sender = senderId ? byId.get(senderId) : undefined;
+      const quotedRes = quotedSenderId ? byId.get(quotedSenderId) : undefined;
 
-    const sender = senderId ? byId.get(senderId) : undefined;
-    const quotedRes = quotedSenderId ? byId.get(quotedSenderId) : undefined;
+      const senderName = showSenderName ? firstHumanDisplayName(
+        [sender?.savedName, sender?.info?.name, content.senderName,
+          content.timestampSource === 'reply' ? undefined : context.senderName],
+        'Pengguna WhatsApp',
+      ) : undefined;
+      const quoted = content.quotedBody
+        ? {
+            senderName: firstHumanDisplayName(
+              [quotedRes?.savedName, quotedRes?.info?.name, content.quotedSenderName],
+              'Pengguna WhatsApp',
+            )!,
+            senderId: quotedSenderId,
+            body: content.quotedBody as string,
+          }
+        : undefined;
 
-    const senderName = firstHumanDisplayName(
-      [sender?.savedName, sender?.info?.name, content.senderName, context.senderName],
-      'Pengguna WhatsApp',
-    );
-    const quoted = content.quotedBody
-      ? {
-          senderName: firstHumanDisplayName(
-            [quotedRes?.savedName, quotedRes?.info?.name, content.quotedSenderName],
-            'Pengguna WhatsApp',
-          )!,
-          senderId: quotedSenderId,
-          body: content.quotedBody as string,
+      let avatar = null;
+      if (showSenderName && waha && !signal.aborted) {
+        if (sender?.info?.picture) {
+          avatar = await optionalLookup(() => waha.fetchExternalImage(sender.info!.picture!, lookupOptions), signal, null);
         }
-      : undefined;
+        if (!avatar && senderId && !signal.aborted) {
+          avatar = await optionalLookup(() => waha.getProfilePicture(senderId, context.session, lookupOptions), signal, null);
+        }
+      }
 
-    let avatar = null;
-    if (waha) {
-      if (sender?.info?.picture) {
-        avatar = await waha.fetchExternalImage(sender.info.picture).catch(() => null);
-      }
-      if (!avatar && senderId) {
-        avatar = await waha.getProfilePicture(senderId).catch(() => null);
-      }
+      throwIfCancelled();
+      return await this.bubbleProcessor.process(text, senderName, senderId, quoted, avatar, time, direction, showSenderName);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
     }
+  }
 
-    return this.bubbleProcessor.process(text, senderName, senderId, quoted, avatar);
+  private async resolveBubbleTime(content: Record<string, unknown>, context: GeneratorContext, options?: WahaLookupOptions): Promise<string> {
+    let timestamp = normalizeMessageTimestamp(content.timestamp);
+    if (timestamp === undefined && content.timestampSource === 'reply' &&
+        typeof content.messageId === 'string' && context.wahaClient) {
+      timestamp = await optionalLookup(() => context.wahaClient!.getMessageTimestamp(
+        context.chatId, content.messageId as string, context.session, options,
+      ), options?.signal, undefined);
+    }
+    return formatMessageTime(timestamp);
   }
 
   private async resolvePeople(
     rawIds: Array<string | undefined>,
     context: GeneratorContext,
+    options?: WahaLookupOptions,
   ): Promise<Map<string, ResolvedPerson>> {
     const waha = context.wahaClient;
     const ids = [...new Set(rawIds.filter(Boolean))] as string[];
@@ -94,8 +157,8 @@ export class TextGenerator implements StickerGenerator {
     const resolved = await Promise.all(
       ids.map(async (id) => {
         const [savedName, info] = await Promise.all([
-          waha.getContactSavedName(id, context.session).catch(() => undefined),
-          waha.getChatInfo(id).catch(() => null),
+          optionalLookup(() => waha.getContactSavedName(id, context.session, options), options?.signal, undefined),
+          optionalLookup(() => waha.getChatInfo(id, context.session, options), options?.signal, null),
         ]);
         return [id, { savedName, info }] as const;
       }),

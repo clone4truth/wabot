@@ -37,4 +37,23 @@ describe('Image Effects', () => {
       expect(meta.height).toBeGreaterThan(0);
     }
   });
+
+  it('shadow follows a transparent subject and keeps empty corners transparent', async () => {
+    const input = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="20" fill="red"/></svg>');
+    const effect = defaultEffectRegistry.get('shadow')!;
+    const processed = await effect.apply(Sharp(input));
+    const { data, info } = await processed.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const pixel = (x: number, y: number) => (y * info.width + x) * info.channels;
+    expect(data[pixel(10, 10) + 3]).toBeLessThanOrEqual(1);
+    expect(data[pixel(44, 44)]).toBeGreaterThan(220);
+    expect(data[pixel(44, 44) + 3]).toBe(255);
+
+    let shadowPixels = 0;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      if (data[offset] < 20 && data[offset + 1] < 20 && data[offset + 2] < 20 && data[offset + 3] > 20 && data[offset + 3] < 155) {
+        shadowPixels++;
+      }
+    }
+    expect(shadowPixels).toBeGreaterThan(100);
+  });
 });

@@ -28,6 +28,35 @@ describe('MessageNormalizer', () => {
     expect(msg.senderName).toBe('Budi');
     expect(msg.isGroup).toBe(false);
     expect(msg.eventId).toBe('bot_false_111@lid_AAA');
+    expect(msg.session).toBe('bot');
+  });
+
+  it.each([1700000000, 1700000000000])('normalizes timestamp %s to Unix milliseconds', (timestamp) => {
+    const msg = normalizer.normalize(basePayload({ timestamp }) as any);
+    expect(msg.timestamp).toBe(1700000000000);
+  });
+
+  it('preserves the original quoted timestamp separately from the command timestamp', () => {
+    const msg = normalizer.normalize(basePayload({
+      replyTo: { id: 'false_222@c.us_old', body: 'halo', timestamp: 1600000000 },
+    }) as any);
+    expect(msg.timestamp).toBe(1700000000000);
+    expect(msg.reply?.timestamp).toBe(1600000000000);
+  });
+
+  it('accepts original engine quotedMsg time when replyTo omits its timestamp', () => {
+    const msg = normalizer.normalize(basePayload({
+      replyTo: { id: 'false_222@c.us_old', body: 'halo' },
+      _data: { t: 1700000000, quotedMsg: { t: 1600000000 } },
+    }) as any);
+    expect(msg.reply?.timestamp).toBe(1600000000000);
+  });
+
+  it('leaves missing reply time unknown instead of borrowing the command time', () => {
+    const msg = normalizer.normalize(basePayload({
+      replyTo: { id: 'false_222@c.us_old', body: 'halo', timestamp: NaN },
+    }) as any);
+    expect(msg.reply?.timestamp).toBeUndefined();
   });
 
   it('DM tanpa notifyName: nama fallback ke ID', () => {

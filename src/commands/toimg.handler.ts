@@ -13,6 +13,7 @@ export function createToimgHandler(stickerService: StickerService) {
       chatId: message.chatId,
       senderId: message.senderId,
       isGroup: message.isGroup,
+      session: message.session,
     });
 
     if (!result) {

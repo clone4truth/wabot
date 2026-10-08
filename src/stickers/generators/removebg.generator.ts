@@ -187,7 +187,7 @@ export class RemoveBgGenerator implements StickerGenerator {
   private async processOutline(transparentPng: Buffer, colorName: string): Promise<Buffer> {
     const color = OUTLINE_COLORS[colorName.toLowerCase()] ?? OUTLINE_COLORS.white;
 
-    // Resize subject to 480x480 inside 512x512 first to make room for outline
+    // Leave room around the fitted subject for the outline.
     const fitted = await (await fitVisibleImage(transparentPng, 472))
       .toBuffer();
 
@@ -200,18 +200,21 @@ export class RemoveBgGenerator implements StickerGenerator {
     const dilatedAlpha = await Sharp(alphaChannel)
       .blur(6)
       .threshold(12)
+      .toColourspace('b-w')
+      .raw()
       .toBuffer();
 
-    // Create solid color layer masked by dilated alpha
+    // A grayscale image has opaque alpha, so dest-in would fill the whole
+    // canvas. Join its pixel values as alpha to keep only the subject border.
     const outlineLayer = await Sharp({
       create: {
         width: w,
         height: h,
-        channels: 4,
+        channels: 3,
         background: color,
       },
     })
-      .composite([{ input: dilatedAlpha, blend: 'dest-in' }])
+      .joinChannel(dilatedAlpha, { raw: { width: w, height: h, channels: 1 } })
       .png()
       .toBuffer();
 

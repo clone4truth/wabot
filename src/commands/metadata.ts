@@ -27,9 +27,9 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   { name: 'stiker shadow', aliases: ['shadow'], description: 'Beri bayangan drop shadow', usage: '!stiker shadow', category: 'Effects' },
 
   // Text
-  { name: 'stiker teks', description: 'Paksa pembuatan stiker teks', usage: '!stiker teks <teks>', category: 'Text' },
-  { name: 'stiker quote', description: 'Stiker kutipan berbingkai nama pengirim', usage: '!stiker quote <teks>', category: 'Text' },
-  { name: 'stiker bubble', description: 'Stiker chat bubble mirip WhatsApp', usage: '!stiker bubble <teks>', category: 'Text' },
+  { name: 'stiker teks', aliases: ['teks'], description: 'Paksa pembuatan stiker teks', usage: '!stiker teks <teks>', category: 'Text' },
+  { name: 'stiker quote', aliases: ['quote'], description: 'Stiker kutipan berbingkai nama pengirim; reply chat atau isi teks langsung', usage: '!stiker quote [teks]', category: 'Text' },
+  { name: 'stiker bubble', aliases: ['bubble'], description: 'Chat bubble WhatsApp; reply chat untuk memakai nama dan waktu pesan asli', usage: '!stiker bubble [teks]', category: 'Text' },
   { name: 'ttp', description: 'Teks ke gambar dengan gaya preset (gradient/dark/gold/terminal/neon/minimal)', usage: '!ttp <teks> atau !ttp style <preset> <teks>', category: 'Text' },
   { name: 'ttp --image', description: 'Buat gambar PNG 1024×1024 dengan teks besar, bisa dibuka penuh', usage: '!ttp --image [style <preset>] <teks>', category: 'Text' },
 
@@ -39,7 +39,7 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   // Creative
   { name: 'stiker removebg', aliases: ['removebg'], description: 'Hapus background foto menjadi transparan', usage: '!stiker removebg (reply foto)', category: 'Creative' },
   { name: 'stiker subject', aliases: ['subject'], description: 'Smart crop otomatis fokus ke objek utama', usage: '!stiker subject (reply foto)', category: 'Creative' },
-  { name: 'stiker outline', aliases: ['outline'], description: 'Tambahkan outline putih/hitam di sekitar objek', usage: '!stiker outline [white|black]', category: 'Creative' },
+  { name: 'stiker outline', aliases: ['outline'], description: 'Tambahkan outline putih, hitam, atau emas di sekitar objek', usage: '!stiker outline [white|black|gold]', category: 'Creative' },
   { name: 'stiker caption', aliases: ['caption'], description: 'Tambahkan caption atas, bawah, atau overlay di foto', usage: '!stiker caption [top|bottom|overlay] <teks>', category: 'Creative' },
   { name: 'stiker template', description: 'Gunakan template stiker (terminal, breaking, wanted, minimal)', usage: '!stiker template <nama> <teks>', category: 'Creative' },
   { name: 'template', description: 'Lihat daftar template atau info detail', usage: '!template list atau !template info <nama>', category: 'Creative' },
@@ -50,7 +50,7 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   { name: 'menu', description: 'Tampilkan menu utama', usage: '!menu', category: 'Utility' },
   { name: 'help', description: 'Bantuan penggunaan atau detail topik', usage: '!help [kategori/command]', category: 'Utility' },
   { name: 'ping', description: 'Cek latensi dan status bot', usage: '!ping', category: 'Utility' },
-  { name: 'prefix', description: 'Lihat atau ubah prefix bot', usage: '!prefix <simbol>', category: 'Utility' },
+  { name: 'prefix', description: 'Lihat atau ubah prefix bot; perubahan di grup hanya untuk admin', usage: '!prefix [simbol]', category: 'Utility' },
   { name: 'job', description: 'Cek status proses stiker aktif', usage: '!job', category: 'Utility' },
 ];
 
@@ -73,4 +73,9 @@ export function findCommand(query: string): CommandMetadata | undefined {
 
 export function getCommandsByCategory(category: string): CommandMetadata[] {
   return COMMAND_REGISTRY.filter((c) => c.category.toLowerCase() === category.toLowerCase());
+}
+
+/** Apply the chat's active prefix to command examples, preserving other text. */
+export function formatCommandExamples(text: string, prefix: string): string {
+  return text.replace(/!(?=(?:stiker|ttp|attp|toimg|togif|template|emoji|badge|menu|help|ping|prefix|job)\b)/g, () => prefix);
 }

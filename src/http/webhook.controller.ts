@@ -16,6 +16,7 @@ import { handleHelp } from '../commands/help.handler';
 import { handlePing } from '../commands/ping.handler';
 import { handleTemplateCommand } from '../commands/template.handler';
 import { handleJobCommand } from '../commands/job.handler';
+import { formatCommandExamples } from '../commands/metadata';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AccessGuard } from '../security/access';
 import { AppError } from '../errors/app-error';
@@ -140,7 +141,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     }
 
     try {
-      await dispatchCommand(parsed, message);
+      await dispatchCommand(parsed, message, prefix);
       idempotency.markDone(idempotencyKey);
     } catch (err) {
       // Gagal -> state dihapus agar retry WAHA boleh memproses lagi.
@@ -183,17 +184,17 @@ async function handlePrefixCommand(message: any, arg: string, replyTo?: string) 
   }
 }
 
-async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseCommand>>, message: any) {
+async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseCommand>>, message: any, prefix: string) {
   const replyTo = message.messageId;
   switch (parsed.name) {
     case 'menu':
-      await wahaClient.sendText(message.chatId, handleMenu(), replyTo);
+      await wahaClient.sendText(message.chatId, handleMenu(prefix), replyTo);
       break;
     case 'help':
-      await wahaClient.sendText(message.chatId, handleHelp(parsed.args), replyTo);
+      await wahaClient.sendText(message.chatId, handleHelp(parsed.args, prefix), replyTo);
       break;
     case 'template':
-      await wahaClient.sendText(message.chatId, handleTemplateCommand(parsed), replyTo);
+      await wahaClient.sendText(message.chatId, handleTemplateCommand(parsed, prefix), replyTo);
       break;
     case 'job':
       await wahaClient.sendText(message.chatId, handleJobCommand(message.senderId), replyTo);
@@ -216,7 +217,7 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
       } catch (err: any) {
         if (err instanceof AppError) {
           // Hanya pesan user yang stabil (Bahasa Indonesia); detail internal tetap di log.
-          await wahaClient.sendText(message.chatId, userMessageForError(err), replyTo);
+          await wahaClient.sendText(message.chatId, formatCommandExamples(userMessageForError(err), prefix), replyTo);
           return;
         }
         throw err;

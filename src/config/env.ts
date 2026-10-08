@@ -101,7 +101,7 @@ const env: EnvConfig = {
   maxVideoQueue: Number(process.env.MAX_VIDEO_QUEUE) || 20,
   maxAnimationQueue: Number(process.env.MAX_ANIMATION_QUEUE) || 20,
   maxBackgroundQueue: Number(process.env.MAX_BACKGROUND_QUEUE) || 10,
-  backgroundRemovalProvider: ((process.env.BACKGROUND_REMOVAL_PROVIDER as any) || 'disabled'),
+  backgroundRemovalProvider: ((process.env.BACKGROUND_REMOVAL_PROVIDER as any) || 'local'),
   backgroundRemovalApiUrl: process.env.BACKGROUND_REMOVAL_API_URL || '',
   backgroundRemovalApiKey: process.env.BACKGROUND_REMOVAL_API_KEY || '',
   backgroundRemovalTimeoutMs: Number(process.env.BACKGROUND_REMOVAL_TIMEOUT_MS) || 30000,

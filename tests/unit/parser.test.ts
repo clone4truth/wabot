@@ -67,6 +67,31 @@ describe('Command Parser', () => {
     expect(parseCommand('hello')).toBeNull();
   });
 
+  it('ignores a prefix without a command name', () => {
+    expect(parseCommand('!')).toBeNull();
+    expect(parseCommand('! \n\t')).toBeNull();
+  });
+
+  it('accepts tabs and newlines between a command and its arguments', () => {
+    expect(parseCommand('!stiker\nbubble Halo\ndunia')).toMatchObject({
+      name: 'stiker', modifier: 'bubble', args: 'Halo\ndunia',
+    });
+    expect(parseCommand('?help\tbubble', '?')).toMatchObject({ name: 'help', args: 'bubble' });
+  });
+
+  it.each([
+    ['!stiker bubble Baris satu\n\nBaris  dua', 'Baris satu\n\nBaris  dua'],
+    ['!stiker quote Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+    ['!stiker teks Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+    ['!stiker caption top Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+    ['!stiker template terminal npm test\nnpm start', 'npm test\nnpm start'],
+    ['!ttp style gold Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+    ['!ttp --image style gold Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+    ['!attp effect fade Baris satu\nBaris dua', 'Baris satu\nBaris dua'],
+  ])('preserves text formatting after syntax tokens in %s', (body, expected) => {
+    expect(parseCommand(body)?.args).toBe(expected);
+  });
+
   it('parses !toimg', () => {
     const result = parseCommand('!toimg');
     expect(result?.name).toBe('toimg');

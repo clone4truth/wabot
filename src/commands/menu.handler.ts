@@ -1,6 +1,7 @@
-import { COMMAND_REGISTRY } from './metadata';
+import env from '../config/env';
+import { COMMAND_REGISTRY, formatCommandExamples } from './metadata';
 
-export function handleMenu(): string {
+export function handleMenu(prefix: string = env.commandPrefix): string {
   const categories = [
     { key: 'Sticker', label: '🎨 *Sticker*' },
     { key: 'Effects', label: '✨ *Effects*' },
@@ -25,5 +26,5 @@ export function handleMenu(): string {
   }
 
   lines.push('💡 _Ketik `!help <topik>` untuk panduan detail (contoh: `!help effects`, `!help removebg`)_');
-  return lines.join('\n');
+  return formatCommandExamples(lines.join('\n'), prefix);
 }

@@ -11,6 +11,7 @@ import { ToGifProcessor } from '../../src/stickers/processors/togif.processor';
 import { AppError } from '../../src/errors/app-error';
 import { ErrorCode } from '../../src/errors/error-codes';
 import env from '../../src/config/env';
+import { convertVideoToAnimatedWebp, FFMPEG_THREAD_ARGS, getVideoMetadata, runFfmpegWithTimeout } from '../../src/media/ffmpeg';
 
 const dlMock = vi.hoisted(() => ({ downloadMedia: vi.fn() }));
 vi.mock('../../src/media/downloader', () => ({
@@ -30,13 +31,24 @@ function serveAsTemp(name: string): string {
 }
 
 describe('Video + konversi sticker (fixtures lokal)', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     execSync(`ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=2:size=320x240:rate=10 -c:v mpeg4 ${workdir}/short.mp4`);
     execSync(`ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=2:size=240x320:rate=10 -c:v mpeg4 ${workdir}/portrait.mp4`);
     execSync(`ffmpeg -y -loglevel error -f lavfi -i testsrc=duration=11:size=320x240:rate=10 -c:v mpeg4 ${workdir}/long.mp4`);
     files['short.mp4'] = `${workdir}/short.mp4`;
     files['portrait.mp4'] = `${workdir}/portrait.mp4`;
     files['long.mp4'] = `${workdir}/long.mp4`;
+    files['high-detail.mp4'] = path.join(workdir, 'high-detail.mp4');
+    await runFfmpegWithTimeout([
+      '-y', '-loglevel', 'error', ...FFMPEG_THREAD_ARGS,
+      '-f', 'lavfi', '-i', 'testsrc2=s=512x512:r=15:d=10,noise=alls=18:allf=t',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '32', '-pix_fmt', 'yuv420p', '-an', files['high-detail.mp4'],
+    ], 30_000);
+    files['fractional.mp4'] = path.join(workdir, 'fractional.mp4');
+    await runFfmpegWithTimeout([
+      '-y', '-loglevel', 'error', ...FFMPEG_THREAD_ARGS,
+      '-i', files['high-detail.mp4'], '-t', '9.7', '-c:v', 'copy', '-an', files['fractional.mp4'],
+    ], 30_000);
     dlMock.downloadMedia.mockImplementation(async (url: string) => {
       const name = String(url).split('/').pop() || '';
       const src = files[name];
@@ -84,6 +96,48 @@ describe('Video + konversi sticker (fixtures lokal)', () => {
     const meta = await Sharp(result.buffer).metadata();
     expect(meta.width).toBeLessThanOrEqual(512);
     expect(meta.height).toBeLessThanOrEqual(512);
+  }, 60000);
+
+  it('portrait video uses a 512px square with transparent padding and preserves the full duration', async () => {
+    const result = await new VideoStickerProcessor().process('http://x/portrait.mp4');
+    const meta = await Sharp(result.buffer).metadata();
+    expect(meta.width).toBe(512);
+    expect(meta.height).toBe(512);
+    expect(meta.delay?.reduce((sum, delay) => sum + delay, 0)).toBe(2000);
+    const { data, info } = await Sharp(result.buffer, { page: 0 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect(data[(256 * info.width + 0) * info.channels + 3]).toBe(0);
+    expect(data[(256 * info.width + 256) * info.channels + 3]).toBe(255);
+  }, 60000);
+
+  it('high-detail 10s video is re-encoded below 500KiB without cutting its duration or canvas', async () => {
+    const beforeOutputs = fs.readdirSync(env.tempDir).sort();
+    const baselinePath = path.join(workdir, 'high-detail-baseline.webp');
+    try {
+      expect(fs.statSync(files['high-detail.mp4']).size).toBeLessThan(env.maxVideoBytes);
+      await convertVideoToAnimatedWebp(files['high-detail.mp4'], baselinePath);
+      expect(fs.statSync(baselinePath).size).toBeGreaterThan(500 * 1024);
+      const result = await new VideoStickerProcessor().process('http://x/high-detail.mp4');
+      expect(result.size).toBeLessThanOrEqual(500 * 1024);
+      expect(result.size).toBe(result.buffer.length);
+      const meta = await Sharp(result.buffer).metadata();
+      expect(meta.width).toBe(512);
+      expect(meta.height).toBe(512);
+      expect(meta.pages).toBeGreaterThan(1);
+      expect(meta.delay?.reduce((sum, delay) => sum + delay, 0)).toBe(10_000);
+      expect(fs.readdirSync(env.tempDir).sort()).toEqual(beforeOutputs);
+    } finally {
+      fs.rmSync(baselinePath, { force: true });
+    }
+  }, 60000);
+
+  it('compression preserves a fractional video duration instead of rounding it to whole seconds', async () => {
+    const source = await getVideoMetadata(files['fractional.mp4']);
+    const result = await new VideoStickerProcessor().process('http://x/fractional.mp4');
+    const meta = await Sharp(result.buffer).metadata();
+    expect(result.size).toBeLessThanOrEqual(500 * 1024);
+    expect(meta.delay?.reduce((sum, delay) => sum + delay, 0)).toBe(Math.round(source.duration * 1000));
+    expect(source.duration).toBeLessThan(10);
+    expect(meta.delay?.every((delay) => delay >= 8)).toBe(true);
   }, 60000);
 
   it('video timeout -> PROCESSING_TIMEOUT + ffmpeg mati', async () => {

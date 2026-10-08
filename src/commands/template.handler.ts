@@ -1,7 +1,9 @@
 import { ParsedCommand } from './parser';
 import { defaultTemplateRegistry } from '../stickers/templates/registry';
+import env from '../config/env';
+import { formatCommandExamples } from './metadata';
 
-export function handleTemplateCommand(command: ParsedCommand): string {
+export function handleTemplateCommand(command: ParsedCommand, prefix: string = env.commandPrefix): string {
   const parts = command.args.trim().split(/\s+/).filter(Boolean);
   const action = parts[0]?.toLowerCase();
 
@@ -9,13 +11,20 @@ export function handleTemplateCommand(command: ParsedCommand): string {
     const name = parts[1].toLowerCase();
     const tpl = defaultTemplateRegistry.get(name);
     if (!tpl) {
-      return `❌ Template "${name}" tidak ditemukan.\nGunakan !template list untuk melihat daftar.`;
+      return formatCommandExamples(`❌ Template "${name}" tidak ditemukan.\nGunakan !template list untuk melihat daftar.`, prefix);
     }
-    return `📋 *Template Info: ${tpl.name}*\n` +
+    return formatCommandExamples(`📋 *Template Info: ${tpl.name}*\n` +
       `Deskripsi: ${tpl.description}\n` +
       `Input: ${tpl.supportedInput}\n\n` +
       `Contoh penggunaan:\n` +
-      `!stiker template ${tpl.name} Teks contoh`;
+      `!stiker template ${tpl.name} Teks contoh`, prefix);
+  }
+
+  if (action === 'info') {
+    return formatCommandExamples('❌ Tentukan nama template. Contoh: !template info terminal.\nGunakan !template list untuk melihat daftar.', prefix);
+  }
+  if (action && action !== 'list') {
+    return formatCommandExamples(`❌ Perintah template "${action}" tidak dikenal.\nGunakan !template list atau !template info <nama>.`, prefix);
   }
 
   const list = defaultTemplateRegistry.list();
@@ -25,5 +34,5 @@ export function handleTemplateCommand(command: ParsedCommand): string {
   }
   text += '\n💡 Cara pakai: `!stiker template <nama> <teks>`';
   text += '\nℹ️ Info detail: `!template info <nama>`';
-  return text;
+  return formatCommandExamples(text, prefix);
 }

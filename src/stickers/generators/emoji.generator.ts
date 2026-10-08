@@ -14,7 +14,7 @@ export class EmojiGenerator implements StickerGenerator {
 
   validate(input: GeneratorInput, _context: GeneratorContext): void {
     const raw = (input.text ?? input.content?.text ?? '') as string;
-    const clean = sanitizeText(raw);
+    const clean = sanitizeText(raw).replace(/\s+/gu, '');
     const graphemes = splitGraphemes(clean);
     const count = graphemes.length;
     if (count < 1 || count > 4) {
@@ -28,7 +28,7 @@ export class EmojiGenerator implements StickerGenerator {
 
   async process(input: GeneratorInput, _context: GeneratorContext): Promise<ProcessingResult> {
     const raw = (input.text ?? input.content?.text ?? '') as string;
-    const clean = sanitizeText(raw);
+    const clean = sanitizeText(raw).replace(/\s+/gu, '');
     const graphemes = splitGraphemes(clean);
     const count = graphemes.length;
 

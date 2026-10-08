@@ -70,12 +70,17 @@ export class ShadowEffect implements ImageEffect {
     const h = meta.height || 512;
 
     const alpha = await Sharp(imgBuffer).extractChannel(3).toBuffer();
-    const blurredAlpha = await Sharp(alpha).blur(8).toBuffer();
+    const blurredAlpha = await Sharp(alpha)
+      .blur(8)
+      .linear(0.6)
+      .toColourspace('b-w')
+      .raw()
+      .toBuffer();
 
     const shadowLayer = await Sharp({
-      create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.6 } },
+      create: { width: w, height: h, channels: 3, background: { r: 0, g: 0, b: 0 } },
     })
-      .composite([{ input: blurredAlpha, blend: 'dest-in' }])
+      .joinChannel(blurredAlpha, { raw: { width: w, height: h, channels: 1 } })
       .png()
       .toBuffer();
 

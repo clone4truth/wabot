@@ -31,7 +31,7 @@ describe('TextGenerator display name', () => {
         text: 'Halo',
         content: { senderId: '628123@lid', senderName: '628123' },
       },
-      { chatId: 'group@g.us', senderId: '628123@lid', wahaClient: wahaClient as any },
+      { chatId: 'group@g.us', senderId: 'requester@lid', wahaClient: wahaClient as any },
     );
 
     expect(processBubble).toHaveBeenCalledWith(
@@ -40,6 +40,9 @@ describe('TextGenerator display name', () => {
       '628123@lid',
       undefined,
       null,
+      '--:--',
+      'incoming',
+      true,
     );
   });
 

@@ -145,6 +145,38 @@ describe('Webhook end-to-end', () => {
     expect(wahaMocks.sendText).toHaveBeenCalledTimes(2);
   });
 
+  it('unknown command -> useful reply with 200, and duplicate is not retried', async () => {
+    const raw = rawMessage('!missing-command');
+    const first = await postWebhook(raw);
+    const duplicate = await postWebhook(raw);
+    expect(first.statusCode).toBe(200);
+    expect(duplicate.statusCode).toBe(200);
+    expect(JSON.parse(duplicate.body).duplicate).toBe(true);
+    expect(wahaMocks.sendText).toHaveBeenCalledTimes(1);
+    expect(wahaMocks.sendText.mock.calls[0][1]).toContain('!menu');
+  });
+
+  it('menu, help, template and error guidance follow the per-chat prefix', async () => {
+    const chat = uid('guidance-prefix') + '@c.us';
+    runtimeConfig.setPrefix(chat, '?');
+    try {
+      const commands = ['?menu', '?help bubble', '?template info terminal', '?missing-command', '?toimg'];
+      for (const command of commands) {
+        const res = await postWebhook(rawMessage(command, { from: chat }));
+        expect(res.statusCode).toBe(200);
+      }
+      const texts = wahaMocks.sendText.mock.calls.map((call) => String(call[1]));
+      expect(texts[0]).toContain('?stiker bubble');
+      expect(texts[1]).toContain('?stiker bubble');
+      expect(texts[2]).toContain('?stiker template terminal');
+      expect(texts[3]).toContain('?menu');
+      expect(texts).toHaveLength(commands.length);
+      for (const text of texts) expect(text).not.toMatch(/!(?:stiker|ttp|toimg|togif|menu|help|template)/);
+    } finally {
+      runtimeConfig.clearPrefix(chat);
+    }
+  });
+
   it('!stiker hello -> render + kirim stiker webp', async () => {
     const res = await postWebhook(rawMessage('!stiker hello'));
     expect(res.statusCode).toBe(200);

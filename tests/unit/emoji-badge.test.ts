@@ -138,6 +138,19 @@ describe('BadgeGenerator', () => {
       generator.validate({ type: 'badge', text: 'STATUS_YANG_TERLALU_PANJANG_UNTUK_BADGE' }, context)
     ).toThrow(/maksimal 24 karakter/i);
   });
+
+  it('reports the actual 24-character badge limit to the user', async () => {
+    const input = { type: 'badge', text: 'x'.repeat(25) };
+    try {
+      generator.validate(input, context);
+      throw new Error('Expected long badge validation to fail');
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'TEXT_TOO_LONG', userMessage: '❌ Teks badge maksimal 24 karakter.' });
+    }
+    await expect(generator.process(input, context)).rejects.toMatchObject({
+      code: 'TEXT_TOO_LONG', userMessage: '❌ Teks badge maksimal 24 karakter.',
+    });
+  });
 });
 
 describe('CaptionGenerator', () => {

@@ -21,13 +21,20 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
   if (!prefix || !trimmed.startsWith(prefix)) return null;
 
   const afterPrefix = trimmed.slice(prefix.length).trim();
+  if (!afterPrefix) return null;
   const lower = afterPrefix.toLowerCase();
 
-  const spaceIdx = afterPrefix.indexOf(' ');
+  const spaceIdx = afterPrefix.search(/\s/);
   const commandName = spaceIdx === -1 ? lower : afterPrefix.slice(0, spaceIdx).toLowerCase();
   const argsStr = spaceIdx === -1 ? '' : afterPrefix.slice(spaceIdx + 1).trim();
 
-  const parts = argsStr.split(/\s+/).filter(Boolean);
+  const tokens = [...argsStr.matchAll(/\S+/g)];
+  const parts = tokens.map((token) => token[0]);
+  // Consume syntax tokens by offset so newlines and spaces in the actual text
+  // survive parsing (chat bubbles, captions, styled text, and templates).
+  const afterTokens = (count: number): string => tokens[count]
+    ? argsStr.slice(tokens[count].index)
+    : '';
 
   let modifier: string | undefined;
   let remainingArgs = argsStr;
@@ -37,13 +44,13 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
 
   if (commandName === 'stiker' && RESERVED_MODIFIERS.includes(firstPart || '')) {
     modifier = firstPart;
-    remainingArgs = parts.slice(1).join(' ');
+    remainingArgs = afterTokens(1);
 
     if (firstPart === 'caption') {
       const second = parts[1]?.toLowerCase();
       if (second === 'top' || second === 'bottom' || second === 'overlay') {
         options = { position: second };
-        remainingArgs = parts.slice(2).join(' ');
+        remainingArgs = afterTokens(2);
       } else {
         options = { position: 'bottom' };
       }
@@ -51,7 +58,7 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
       const second = parts[1]?.toLowerCase();
       if (second === 'white' || second === 'black' || second === 'gold') {
         options = { color: second };
-        remainingArgs = parts.slice(2).join(' ');
+        remainingArgs = afterTokens(2);
       } else {
         options = { color: 'white' };
       }
@@ -59,7 +66,7 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
       const templateName = parts[1]?.toLowerCase();
       if (templateName) {
         options = { template: templateName };
-        remainingArgs = parts.slice(2).join(' ');
+        remainingArgs = afterTokens(2);
       }
     }
   } else if (commandName === 'ttp') {
@@ -67,16 +74,16 @@ export function parseCommand(body: string, prefix: string = env.commandPrefix): 
     if (firstPart === '--image') {
       options = { output: 'image' };
       styleOffset = 1;
-      remainingArgs = argsStr.replace(/^--image(?:\s+|$)/i, '');
+      remainingArgs = afterTokens(1);
     }
     if (parts[styleOffset]?.toLowerCase() === 'style' && parts[styleOffset + 1]) {
       options = { ...options, style: parts[styleOffset + 1].toLowerCase() };
-      remainingArgs = parts.slice(styleOffset + 2).join(' ');
+      remainingArgs = afterTokens(styleOffset + 2);
     }
   } else if (commandName === 'attp') {
     if (firstPart === 'effect' && parts[1]) {
       options = { effect: parts[1].toLowerCase() };
-      remainingArgs = parts.slice(2).join(' ');
+      remainingArgs = afterTokens(2);
     }
   }
 

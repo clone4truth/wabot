@@ -209,6 +209,7 @@ export async function convertVideoToAnimatedWebp(
   fps: number = 15,
   timeoutMs: number = env.videoProcessingTimeoutMs,
   signal?: AbortSignal,
+  quality: number = 80,
 ): Promise<void> {
   try {
     await runFfmpegWithTimeout([
@@ -217,12 +218,12 @@ export async function convertVideoToAnimatedWebp(
       '-threads', '1',
       '-filter_threads', '1',
       '-i', inputPath,
-      '-vf', `scale=${maxWidth}:${maxWidth}:force_original_aspect_ratio=decrease`,
+      '-vf', `scale=${maxWidth}:${maxWidth}:force_original_aspect_ratio=decrease,format=rgba,pad=${maxWidth}:${maxWidth}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`,
       '-t', String(maxDurationSec),
       '-r', String(fps),
       '-c:v', 'libwebp',
       '-lossless', '0',
-      '-quality', '80',
+      '-quality', String(quality),
       '-loop', '0',
       '-delay', String(1000 / fps),
       '-an',

@@ -22,6 +22,6 @@ export class MemeGenerator implements StickerGenerator {
   async process(input: GeneratorInput): Promise<ProcessingResult> {
     const mediaUrl = input.mediaUrl ?? (input.content?.mediaUrl as string);
     const args = (input.content?.args as string) ?? input.text ?? '';
-    return this.processor.process(mediaUrl, args);
+    return this.processor.process(mediaUrl, args, input.timeoutMs, input.signal);
   }
 }

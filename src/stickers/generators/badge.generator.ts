@@ -67,7 +67,9 @@ export class BadgeGenerator implements StickerGenerator {
       throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Teks badge tidak boleh kosong');
     }
     if (countGraphemes(clean) > 24) {
-      throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks badge maksimal 24 karakter');
+      throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks badge maksimal 24 karakter', {
+        userMessage: '❌ Teks badge maksimal 24 karakter.',
+      });
     }
   }
 
@@ -78,7 +80,9 @@ export class BadgeGenerator implements StickerGenerator {
       throw new AppError(ErrorCode.INVALID_ARGUMENT, 'Teks badge tidak boleh kosong');
     }
     if (countGraphemes(clean) > 24) {
-      throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks badge maksimal 24 karakter');
+      throw new AppError(ErrorCode.TEXT_TOO_LONG, 'Teks badge maksimal 24 karakter', {
+        userMessage: '❌ Teks badge maksimal 24 karakter.',
+      });
     }
 
     const themeKey = clean.toLowerCase();

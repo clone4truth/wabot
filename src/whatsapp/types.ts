@@ -22,6 +22,7 @@ export interface WahaMessage {
   };
   replyTo?: {
     id: string;
+    timestamp?: number;
     body?: string;
     participant?: string;
     sender?: string;
@@ -31,13 +32,17 @@ export interface WahaMessage {
       url: string;
       mimetype: string;
     };
+    _data?: any;
   };
   _data?: any;
 }
 
 export interface NormalizedMessage {
   eventId: string;
+  session?: string;
   messageId: string;
+  /** Original message timestamp, normalized to Unix milliseconds. */
+  timestamp?: number;
   chatId: string;
   senderId: string;
   senderName: string;
@@ -51,6 +56,8 @@ export interface NormalizedMessage {
   };
   reply?: {
     messageId: string;
+    /** Quoted message timestamp when supplied by the engine. */
+    timestamp?: number;
     body?: string;
     senderId?: string;
     senderName?: string;

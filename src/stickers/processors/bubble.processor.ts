@@ -1,4 +1,3 @@
-import Sharp from 'sharp';
 import { renderChatBubbleToBuffer, QuotedMessage } from '../rendering/chat-bubble';
 import { StickerResult } from '../result';
 import env from '../../config/env';
@@ -11,6 +10,9 @@ export class BubbleProcessor {
     senderId?: string,
     quoted?: QuotedMessage,
     avatar?: { buffer: Buffer; mimetype: string } | null,
+    time?: string,
+    direction?: 'incoming' | 'outgoing',
+    showSenderName?: boolean,
   ): Promise<StickerResult> {
     const clean = validateText(text, {
       maxLength: env.maxTextLength,
@@ -23,20 +25,18 @@ export class BubbleProcessor {
       text: clean,
       quoted,
       avatar,
+      time,
+      direction,
+      showSenderName,
     });
 
-    const webpBuffer = await Sharp(bubble)
-      .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .webp({ quality: 90 })
-      .toBuffer();
-
     return {
-      buffer: webpBuffer,
+      buffer: bubble,
       mimetype: 'image/webp',
       width: 512,
       height: 512,
       animated: false,
-      size: webpBuffer.length,
+      size: bubble.length,
     };
   }
 }

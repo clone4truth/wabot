@@ -197,4 +197,26 @@ describe('avatar network timeout: production transport (total wall-clock)', () =
 
     await expect(promise).resolves.toBeNull();
   });
+
+  it.each(['headers', 'body'] as const)('external job cancellation destroys the avatar transport while waiting for %s', async (phase) => {
+    stubTransport(() => phase === 'body' ? makeFakeRes(200, { 'content-type': 'image/png' }) : null);
+    const controller = new AbortController();
+    const pending = fetchExternalImageSafe(VALID_URL, { timeoutMs: 5000, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requests).toHaveLength(1);
+    controller.abort();
+    await expect(pending).resolves.toBeNull();
+    expect(requests[0].destroy).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(requests[0].destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('covers stalled DNS without starting a request after cancellation', async () => {
+    stubTransport(() => null);
+    lookupSpy?.mockImplementation(() => new Promise(() => {}));
+    const pending = fetchExternalImageSafe(VALID_URL, { timeoutMs: 50 });
+    await vi.advanceTimersByTimeAsync(60);
+    await expect(pending).resolves.toBeNull();
+    expect(requests).toHaveLength(0);
+  });
 });

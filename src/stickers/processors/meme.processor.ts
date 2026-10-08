@@ -11,7 +11,12 @@ import { countUnicodeCharacters, sanitizeText } from '../rendering/text-utils';
 import env from '../../config/env';
 
 export class MemeProcessor {
-  async process(imageUrl: string, memeText: string): Promise<StickerResult> {
+  async process(
+    imageUrl: string,
+    memeText: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<StickerResult> {
     if (!imageUrl) {
       throw new AppError(
         ErrorCode.MODIFIER_REQUIRES_IMAGE,
@@ -47,7 +52,7 @@ export class MemeProcessor {
       throw new AppError(ErrorCode.TEXT_TOO_LONG, `Teks meme maksimal ${env.maxTextLength} karakter`);
     }
 
-    const { filePath } = await downloadMedia(imageUrl).catch((err) => {
+    const { filePath } = await downloadMedia(imageUrl, { timeoutMs, signal }).catch((err) => {
       if (err instanceof AppError) throw err;
       throw new AppError(ErrorCode.MEDIA_DOWNLOAD_FAILED, `Failed to download image: ${String(err)}`);
     });
@@ -57,7 +62,7 @@ export class MemeProcessor {
         throw new AppError(ErrorCode.MEDIA_DECODE_FAILED, 'Format foto meme tidak didukung atau rusak');
       }
 
-      const imageBuffer = await sharp(filePath, sharpInputOptions()).toBuffer();
+      const imageBuffer = await sharp(filePath, sharpInputOptions()).rotate().toBuffer();
 
       // Lebar teks meme dihitung terhadap canvas akhir 512px (bukan resolusi sumber yang mungkin cuma 100px).
       const textCanvasWidth = 460;

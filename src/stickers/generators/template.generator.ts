@@ -12,7 +12,7 @@ export class TemplateGenerator implements StickerGenerator {
   }
 
   validate(input: GeneratorInput): void {
-    const templateName = (input.options?.template as string) ?? input.modifier ?? '';
+    const templateName = this.templateName(input);
     if (!templateName) {
       throw new AppError(
         ErrorCode.UNSUPPORTED_INPUT,
@@ -23,9 +23,14 @@ export class TemplateGenerator implements StickerGenerator {
   }
 
   async process(input: GeneratorInput): Promise<ProcessingResult> {
-    const templateName = (input.options?.template as string) ?? input.modifier ?? '';
+    const templateName = this.templateName(input);
     const text = input.text ?? (input.content?.text as string) ?? '';
     const template = defaultTemplateRegistry.resolve(templateName);
     return template.render({ text });
+  }
+
+  private templateName(input: GeneratorInput): string {
+    return (input.options?.template as string) ?? (input.content?.template as string)
+      ?? (input.modifier !== 'template' ? input.modifier : undefined) ?? '';
   }
 }

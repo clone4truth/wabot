@@ -2,6 +2,11 @@
 
 Daftar lengkap perintah WhatsApp Sticker Studio:
 
+Contoh memakai prefix bawaan `!`. Jika prefix chat diubah, gunakan prefix aktif;
+menu, bantuan, dan contoh pada pesan kesalahan mengikuti prefix chat tersebut.
+Ketik `!prefix` untuk melihat prefix atau `!prefix ?` untuk menggantinya
+(di grup, perubahan hanya dapat dilakukan admin).
+
 ---
 
 ## 🎨 Sticker Media Dasar & Efek
@@ -28,9 +33,9 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 
 | Perintah | Input | Deskripsi | Contoh |
 | :--- | :--- | :--- | :--- |
-| `!stiker removebg` | Reply/kirim foto | Hapus background foto menjadi transparan (local: latar sederhana/seragam, api: layanan eksternal) | `!stiker removebg` |
+| `!stiker removebg` | Reply/kirim foto | Hapus background foto dengan model AI lokal U²-NetP, tanpa API key atau upload foto | `!stiker removebg` |
 | `!stiker subject` | Reply/kirim foto | Smart crop otomatis fokus pada subjek utama | `!stiker subject` |
-| `!stiker outline [warna]` | Reply/kirim foto | Tambahkan outline tepi stiker | `!stiker outline white`, `!stiker outline black` |
+| `!stiker outline [warna]` | Reply/kirim foto | Tambahkan outline tepi stiker | `!stiker outline white`, `!stiker outline black`, `!stiker outline gold` |
 | `!stiker caption [posisi] <teks>` | Reply/kirim foto | Tambahkan banner caption pada foto | `!stiker caption top Halo`, `!stiker caption bottom Keren`, `!stiker caption overlay Test` |
 | `!stiker template <nama> <teks>` | Teks | Gunakan template SVG artistik | `!stiker template terminal npm test`, `!stiker template breaking Berita Heboh` |
 | `!template list` | Tanpa input | Tampilkan semua template yang tersedia | `!template list` |
@@ -50,7 +55,7 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 | `!stiker <teks>` | Teks langsung/reply | Stiker teks polos adaptif | Grapheme cluster safe |
 | `!stiker teks <teks>` | Teks | Paksa mode teks meski mereply media | Menghindari konflik reply |
 | `!stiker quote` | Reply chat | Stiker kutipan berbingkai nama pengirim | Otomatis ambil nama kontak WAHA |
-| `!stiker bubble` | Reply chat | Stiker chat bubble WhatsApp | Mendukung avatar & quoted reply |
+| `!stiker bubble [teks]` | Reply chat/teks langsung | Bubble WhatsApp Android tema gelap, adaptif terhadap isi teks | Pesan sendiri hijau di kanan; pesan orang lain gelap di kiri; padding jam, nama/avatar grup, dan quoted reply |
 | `!ttp <teks>` | Teks | Stiker teks dengan preset visual | `!ttp style gold Halo`, `!ttp style dark Halo` (preset: gradient, minimal, dark, terminal, gold, neon) |
 | `!ttp --image <teks>` | Teks langsung/reply | Gambar PNG 1024×1024, dirender langsung pada resolusi penuh | `!ttp --image Tulisan besar`, `!ttp --image style gold Halo` |
 | `!attp <teks>` | Teks | Stiker teks animasi multi-frame WebP | `!attp effect fade Halo`, `!attp effect zoom Halo` (preset: rainbow, fade, zoom, blink, slide, bounce) |
@@ -66,14 +71,37 @@ Daftar lengkap perintah WhatsApp Sticker Studio:
 | `!menu` | Bebas | Menampilkan daftar kategori perintah bot |
 | `!help [topik]` | Opsional nama perintah/kategori | Panduan penggunaan detail (misal: `!help effects`, `!help removebg`) |
 | `!ping` | Bebas | Cek status server dan latensi bot |
-| `!prefix <simbol>` | Simbol baru (grup: admin) | Mengubah prefix perintah (misal: `!prefix ?`) |
+| `!prefix [simbol]` | Opsional simbol baru (grup: admin) | Lihat prefix aktif atau ubah prefix perintah (misal: `!prefix ?`) |
 | `!job` | Bebas | Melihat antrean / status proses stiker aktif milik pengirim |
 
 ## Ukuran dan keterbacaan
 
+Bubble mengikuti ukuran isi, memakai proporsi font chat, dan menempatkan jam di
+kanan baris terakhir jika masih muat, dengan ruang antara teks dan jam. Jika tidak
+muat, jam memakai baris terpisah. Jam memakai font lebih kecil dan posisi sedikit
+lebih rendah dari teks, dengan jarak ringkas seperti bubble WhatsApp. Pesan
+normal memakai ukuran font yang konsisten. Baris baru pada pesan dipertahankan.
+
+Arah bubble dilihat dari pengguna yang meminta stiker: teks langsung atau reply
+pesan sendiri berwarna hijau di kanan; reply pesan orang lain berwarna gelap di
+kiri. Ekor bubble mengikuti arahnya. Nama/avatar pengirim hanya muncul pada
+pesan masuk di grup; chat pribadi dan pesan sendiri tidak memiliki header itu.
+Reply tanpa teks tambahan memakai waktu pesan yang direply; teks langsung
+memakai waktu command. Timestamp yang tidak ada di webhook
+dicari dari pesan asli melalui WAHA. Jika tetap tidak tersedia, jam tampil
+`--:--`. Zona waktu default `Asia/Jakarta`; gunakan environment `TZ` untuk
+menyesuaikan zona waktu perangkat WhatsApp.
+
 Stiker tetap 512×512. Font dipilih sebesar mungkin sesuai ruang yang tersedia;
 teks panjang otomatis dibungkus tanpa membuang isi teks. Bila tetap tidak muat,
 bot meminta teks lebih pendek.
+
+Stiker statis yang melewati 100 KB dikompresi otomatis sebelum dikirim, termasuk
+metadata pack. Canvas dan transparansi dipertahankan. Foto dengan detail sangat
+padat dapat mengalami penurunan kualitas agar sesuai batas WhatsApp.
+Video juga memakai canvas 512×512 dengan padding transparan. Jika hasil animasi
+melewati 500 KB, kualitas dan FPS disesuaikan otomatis tanpa memotong durasi
+video, termasuk durasi pecahan detik.
 
 `!stiker` / `!stiker full` memperbesar isi PNG transparan dengan memangkas tepi
 yang sepenuhnya kosong. `removebg` dan `outline` juga memanfaatkan ruang kosong

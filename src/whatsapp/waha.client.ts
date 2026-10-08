@@ -7,6 +7,7 @@ import { hashIdentifier } from '../observability/privacy';
 import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
 import { discardResponseBody } from '../media/http-body';
 import { firstHumanDisplayName } from './display-name';
+import { firstMessageTimestamp } from './message-time';
 
 /**
  * Response resmi WAHA untuk GET /api/{session}/chats/{chatId}/picture
@@ -18,6 +19,18 @@ import { firstHumanDisplayName } from './display-name';
 export interface WahaPictureResponse {
   url?: string | null;
   pictureUrl?: string | null;
+}
+
+export interface WahaLookupOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+function lookupDeadline(options: WahaLookupOptions | undefined, defaultTimeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(0, Math.min(defaultTimeoutMs, options?.timeoutMs ?? defaultTimeoutMs)));
+  const signal = options?.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
+  return { signal, cleanup: () => clearTimeout(timer) };
 }
 
 // Klien WAHA mengikuti docs resmi: POST /api/<action> dengan session di body JSON.
@@ -182,13 +195,12 @@ export class WAHAClient {
 
   // Best-effort: nama kontak manusia. Prioritas nama tersimpan, lalu pushname
   // dan shortName. Nomor/ID mentah sengaja ditolak agar tidak masuk ke stiker.
-  async getContactSavedName(chatId: string, session = this.session): Promise<string | undefined> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
+  async getContactSavedName(chatId: string, session = this.session, options?: WahaLookupOptions): Promise<string | undefined> {
+    const deadline = lookupDeadline(options, 2000);
     try {
       const res = await fetch(
         `${this.baseUrl}/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(session)}`,
-        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+        { headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal },
       );
       if (!res.ok) {
         discardResponseBody(res);
@@ -199,7 +211,30 @@ export class WAHAClient {
     } catch {
       return undefined;
     } finally {
-      clearTimeout(timeout);
+      deadline.cleanup();
+    }
+  }
+
+  // Official Chats API: fetch only the original message metadata, never media.
+  // Missing quotes are best-effort; a bounded lookup must not block the sticker.
+  async getMessageTimestamp(chatId: string, messageId: string, session = this.session, options?: WahaLookupOptions): Promise<number | undefined> {
+    if (!chatId || !messageId) return undefined;
+    const deadline = lookupDeadline(options, 2000);
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}?downloadMedia=false`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal },
+      );
+      if (!res.ok) {
+        discardResponseBody(res);
+        return undefined;
+      }
+      const data = (await res.json()) as any;
+      return firstMessageTimestamp(data?.timestamp, data?._data?.timestamp, data?._data?.t, data?._data?.messageTimestamp);
+    } catch {
+      return undefined;
+    } finally {
+      deadline.cleanup();
     }
   }
 
@@ -228,13 +263,12 @@ export class WAHAClient {
       clearTimeout(timeout);
     }
   }
-  async getChatInfo(chatId: string): Promise<{ name?: string; picture?: string } | null> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
+  async getChatInfo(chatId: string, session = this.session, options?: WahaLookupOptions): Promise<{ name?: string; picture?: string } | null> {
+    const deadline = lookupDeadline(options, 2500);
     try {
       const res = await fetch(
-        `${this.baseUrl}/api/${this.session}/chats/overview?limit=1&ids=${encodeURIComponent(chatId)}`,
-        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+        `${this.baseUrl}/api/${encodeURIComponent(session)}/chats/overview?limit=1&ids=${encodeURIComponent(chatId)}`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal },
       );
       if (!res.ok) {
         discardResponseBody(res);
@@ -250,7 +284,7 @@ export class WAHAClient {
     } catch {
       return null;
     } finally {
-      clearTimeout(timeout);
+      deadline.cleanup();
     }
   }
 
@@ -260,13 +294,12 @@ export class WAHAClient {
 
   // Best-effort: ambil foto profil chat untuk avatar stiker. null bila tidak ada/gagal.
   // Menggunakan SSRF-safe fetcher untuk URL picture yang dikembalikan WAHA.
-  async getProfilePicture(chatId: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+  async getProfilePicture(chatId: string, session = this.session, options?: WahaLookupOptions): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    const deadline = lookupDeadline(options, 3000);
     try {
       const res = await fetch(
-        `${this.baseUrl}/api/${this.session}/chats/${encodeURIComponent(chatId)}/picture`,
-        { headers: { 'X-Api-Key': this.apiKey }, signal: controller.signal },
+        `${this.baseUrl}/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/picture`,
+        { headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal },
       );
       if (!res.ok) {
         discardResponseBody(res);
@@ -277,19 +310,20 @@ export class WAHAClient {
       // `pictureUrl` hanya fallback kompatibilitas, bukan field resmi.
       const pictureUrl: string | null | undefined = data?.url ?? data?.pictureUrl;
       if (!pictureUrl) return null;
-      return this.fetchExternalImage(pictureUrl);
+      return await this.fetchExternalImage(pictureUrl, { ...options, signal: deadline.signal });
     } catch {
       return null;
     } finally {
-      clearTimeout(timeout);
+      deadline.cleanup();
     }
   }
 
   // Best-effort: download gambar dari URL eksternal menggunakan SSRF-safe fetcher.
   // Mengembalikan null bila URL private/tidak valid/gagal.
-  async fetchExternalImage(url: string): Promise<{ buffer: Buffer; mimetype: string } | null> {
+  async fetchExternalImage(url: string, options?: WahaLookupOptions): Promise<{ buffer: Buffer; mimetype: string } | null> {
     return fetchExternalImageSafe(url, {
-      timeoutMs: 5_000,
+      timeoutMs: options?.timeoutMs ?? 5_000,
+      signal: options?.signal,
       maxBytes: env.avatarMaxBytes,
       maxPixels: env.avatarMaxPixels,
     });

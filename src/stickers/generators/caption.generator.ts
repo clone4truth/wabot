@@ -70,7 +70,10 @@ export class CaptionGenerator implements StickerGenerator {
     const bannerHeight = Math.max(112, Math.min(192, fitted.contentHeight + 32));
     const imageHeight = 512 - bannerHeight;
 
-    const { filePath } = await downloadMedia(mediaUrl);
+    const { filePath } = await downloadMedia(mediaUrl, {
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+    });
 
     try {
       if (!(await validateImageContent(filePath))) {
@@ -91,6 +94,7 @@ export class CaptionGenerator implements StickerGenerator {
 
       if (position === 'top') {
         const resizedImage = await Sharp(filePath, sharpInputOptions())
+          .rotate()
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
@@ -107,6 +111,7 @@ export class CaptionGenerator implements StickerGenerator {
         ]);
       } else if (position === 'overlay') {
         const resizedImage = await Sharp(filePath, sharpInputOptions())
+          .rotate()
           .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 
@@ -116,6 +121,7 @@ export class CaptionGenerator implements StickerGenerator {
       } else {
         // default: bottom
         const resizedImage = await Sharp(filePath, sharpInputOptions())
+          .rotate()
           .resize(512, imageHeight, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .toBuffer();
 

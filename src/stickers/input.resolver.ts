@@ -25,6 +25,9 @@ export interface ResolvedInput {
     text?: string;
     senderName?: string;
     senderId?: string;
+    messageId?: string;
+    timestamp?: number;
+    timestampSource?: 'current' | 'reply';
     quotedSenderName?: string;
     quotedSenderId?: string;
     quotedBody?: string;
@@ -57,12 +60,16 @@ export class InputResolver {
     args: string;
     modifier?: string;
     options?: Record<string, unknown>;
-    reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
+    reply?: { messageId?: string; timestamp?: number; body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     senderName?: string;
     senderId?: string;
+    messageId?: string;
+    timestamp?: number;
   }): ResolvedInput | null {
-    const { command, args, modifier, options, reply, media, senderName, senderId } = msg;
+    const { command, args, modifier, options, reply, media, senderName, senderId, messageId, timestamp } = msg;
+    const currentTime = { messageId, timestamp, timestampSource: 'current' as const };
+    const replyTime = { messageId: reply?.messageId, timestamp: reply?.timestamp, timestampSource: 'reply' as const };
     const commandName = command.replace(/^!/, '').toLowerCase();
 
     if (commandName === 'toimg') {
@@ -114,14 +121,11 @@ export class InputResolver {
     }
 
     // Command: !stiker
-    const hasImageMedia = Boolean(
-      (reply?.media?.url && reply.media.mimetype?.startsWith('image')) ||
-      (media?.url && media.mimetype?.startsWith('image')),
-    );
-    const hasVideoMedia = Boolean(
-      (reply?.media?.url && reply.media.mimetype?.startsWith('video')) ||
-      (media?.url && media.mimetype?.startsWith('video')),
-    );
+    // Use the same reply-first media priority for compatibility checks and
+    // processing. A current video must not prevent editing the replied photo.
+    const targetMedia = reply?.media?.url ? reply.media : media?.url ? media : undefined;
+    const hasImageMedia = Boolean(targetMedia?.mimetype?.startsWith('image'));
+    const hasVideoMedia = Boolean(targetMedia?.mimetype?.startsWith('video'));
 
     // P0: Force Text via modifier === 'teks'
     if (modifier === 'teks') {
@@ -130,7 +134,7 @@ export class InputResolver {
           type: 'text',
           source: reply ? 'reply' : 'direct',
           modifier: 'teks',
-          content: { text: args, args, senderName, senderId },
+          content: { text: args, args, senderName, senderId, ...currentTime },
         };
       }
       // Tanpa args: bila reply teks murni (bukan media), jadikan teks reply
@@ -139,7 +143,7 @@ export class InputResolver {
           type: 'text',
           source: 'reply',
           modifier: 'teks',
-          content: { text: reply.body, args: '', senderName: reply.senderName, senderId: reply.senderId },
+          content: { text: reply.body, args: '', senderName: reply.senderName, senderId: reply.senderId, ...replyTime },
         };
       }
       // Reply media atau tanpa teks sama sekali
@@ -169,6 +173,7 @@ export class InputResolver {
             args,
             senderName,
             senderId,
+            ...currentTime,
             quotedSenderName: reply?.senderName,
             quotedSenderId: reply?.senderId,
             quotedBody: reply?.body,
@@ -180,7 +185,7 @@ export class InputResolver {
           type: 'text',
           source: 'reply',
           modifier,
-          content: { text: reply.body, args: '', senderName: reply.senderName, senderId: reply.senderId },
+          content: { text: reply.body, args: '', senderName: reply.senderName, senderId: reply.senderId, ...replyTime },
         };
       }
       throw new AppError(
@@ -215,14 +220,13 @@ export class InputResolver {
           { userMessage: `❌ Mode ${modifier} membutuhkan foto.` },
         );
       }
-      if (!hasImageMedia) {
+      if (!hasImageMedia || !targetMedia) {
         throw new AppError(
           ErrorCode.MODIFIER_REQUIRES_IMAGE,
           `Mode ${modifier} membutuhkan foto`,
           { userMessage: `❌ Mode ${modifier} membutuhkan foto.` },
         );
       }
-      const targetMedia = (reply?.media?.url && reply.media.mimetype?.startsWith('image')) ? reply.media : media!;
       const isReply = Boolean(reply?.media?.url && reply.media.mimetype?.startsWith('image'));
       if (modifier === 'meme') {
         return {
@@ -285,6 +289,7 @@ export class InputResolver {
             args,
             senderName,
             senderId,
+            ...currentTime,
             quotedSenderName: reply.senderName,
             quotedSenderId: reply.senderId,
             quotedBody,
@@ -295,7 +300,7 @@ export class InputResolver {
         return {
           type: 'text',
           source: 'reply',
-          content: { text: reply.body, args, senderName: reply.senderName, senderId: reply.senderId },
+          content: { text: reply.body, args, senderName: reply.senderName, senderId: reply.senderId, ...replyTime },
         };
       }
     }
@@ -310,7 +315,7 @@ export class InputResolver {
 
     // Priority 3: Direct text
     if (args) {
-      return { type: 'text', source: 'direct', content: { text: args, args, senderName, senderId } };
+      return { type: 'text', source: 'direct', content: { text: args, args, senderName, senderId, ...currentTime } };
     }
 
     return null;

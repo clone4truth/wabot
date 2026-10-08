@@ -233,4 +233,25 @@ describe('Video: strict remaining budget (no deadline extension)', () => {
       try { fs.unlinkSync(tmp); } catch { /* ignore */ }
     }
   }, 60_000);
+
+  it('size retries share the original deadline and cancellation signal', async () => {
+    const tmp = stubDownload('size-retry');
+    const { Image } = require('node-webpmux');
+    const image = new Image();
+    await image.load(animatedWebp);
+    image.exif = Buffer.alloc(600 * 1024);
+    const oversized = await image.save(null);
+    ffmpegMocks.convertVideoToAnimatedWebp.mockImplementationOnce(async (_input: string, output: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      fs.writeFileSync(output, oversized);
+    });
+    await new VideoStickerProcessor().process('http://x/video.mp4', 60_000);
+    const calls = ffmpegMocks.convertVideoToAnimatedWebp.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[1][5]).toBeLessThan(calls[0][5]);
+    expect(calls[1][6]).toBe(calls[0][6]);
+    expect(calls[1][4]).toBeLessThan(calls[0][4]);
+    expect(calls[1][7]).toBeLessThan(calls[0][7]);
+    expect(fs.existsSync(tmp)).toBe(false);
+  }, 60_000);
 });

@@ -36,7 +36,7 @@ describe('BackgroundRemovalProvider & Service', () => {
     });
   });
 
-  it('LocalBackgroundRemovalProvider removes background based on corner color', async () => {
+  it('LocalBackgroundRemovalProvider preserves a foreground object and removes its background', async () => {
     const { buffer } = await createFixtureImageWithCircle();
     const provider = new LocalBackgroundRemovalProvider();
     const transparentPng = await provider.removeBackground(buffer);
@@ -51,6 +51,59 @@ describe('BackgroundRemovalProvider & Service', () => {
     // Center pixel (red circle) should have high alpha:
     const centerIdx = (100 * 200 + 100) * 4;
     expect(data[centerIdx + 3]).toBeGreaterThan(200);
+  });
+
+  it('removes a varied photographic background offline while the event loop remains responsive', async () => {
+    const input = fs.readFileSync('tests/fixtures/background-removal/astronaut.png');
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 25);
+    let output: Buffer;
+    try {
+      output = await new LocalBackgroundRemovalProvider().removeBackground(input);
+    } finally {
+      clearInterval(timer);
+    }
+    const { data, info } = await Sharp(output!).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const alpha = (x: number, y: number) => data[(y * info.width + x) * 4 + 3];
+    // Gray wall, purple flag and gold rocket all disappear; skin, black
+    // collar and helmet remain, independent of their RGB corner colors.
+    for (const [x, y] of [[0, 0], [50, 50], [400, 50]]) expect(alpha(x, y)).toBeLessThan(10);
+    for (const [x, y] of [[220, 100], [180, 250], [300, 450]]) expect(alpha(x, y)).toBeGreaterThan(240);
+    expect(ticks).toBeGreaterThan(10);
+  }, 15_000);
+
+  it('keeps existing transparent cutout details without re-segmenting them', async () => {
+    const input = await Sharp(Buffer.from(`<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="30" fill="white"/><circle cx="50" cy="50" r="10" fill="black"/>
+    </svg>`)).png().toBuffer();
+    const output = await new LocalBackgroundRemovalProvider().removeBackground(input);
+    const before = await Sharp(input).ensureAlpha().raw().toBuffer();
+    const after = await Sharp(output).ensureAlpha().raw().toBuffer();
+    expect(after).toEqual(before);
+  });
+
+  it('terminates cancelled inference and can process the next job with a fresh worker', async () => {
+    const { buffer } = await createFixtureImageWithCircle();
+    const provider = new LocalBackgroundRemovalProvider();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 50);
+    try {
+      await expect(provider.removeBackground(buffer, { signal: controller.signal })).rejects.toMatchObject({
+        code: ErrorCode.PROCESSING_TIMEOUT,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const output = await provider.removeBackground(buffer);
+    const { data } = await Sharp(output).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect(data[(100 * 200 + 100) * 4 + 3]).toBeGreaterThan(200);
+  }, 15_000);
+
+  it('honors an expired local processing budget', async () => {
+    const { buffer } = await createFixtureImageWithCircle();
+    await expect(new LocalBackgroundRemovalProvider().removeBackground(buffer, { timeoutMs: 0 })).rejects.toMatchObject({
+      code: ErrorCode.PROCESSING_TIMEOUT,
+    });
   });
 
   it('BackgroundRemovalService delegates directly to provider', async () => {
@@ -140,6 +193,24 @@ describe('RemoveBgGenerator', () => {
     // Verify alpha dilation exists
     const meta = await Sharp(result.buffer).metadata();
     expect(meta.format).toBe('webp');
+
+    const { data, info } = await Sharp(result.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    // The outline must follow the subject, leaving the canvas corners transparent.
+    for (const [x, y] of [[0, 0], [511, 0], [0, 511], [511, 511]]) {
+      expect(data[(y * info.width + x) * info.channels + 3]).toBe(0);
+    }
+    const center = (256 * info.width + 256) * info.channels;
+    expect(data[center]).toBeGreaterThan(220);
+    expect(data[center + 1]).toBeLessThan(40);
+
+    let whiteOutlinePixels = 0;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      if (data[offset] > 220 && data[offset + 1] > 220 && data[offset + 2] > 220 && data[offset + 3] > 220) {
+        whiteOutlinePixels++;
+      }
+    }
+    expect(whiteOutlinePixels).toBeGreaterThan(5_000);
+    expect(whiteOutlinePixels).toBeLessThan(50_000);
   });
 
   it('rejects input without mediaUrl', () => {

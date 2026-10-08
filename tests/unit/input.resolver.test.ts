@@ -4,6 +4,16 @@ import { InputResolver } from '../../src/stickers/input.resolver';
 describe('InputResolver', () => {
   const resolver = new InputResolver();
 
+  it('uses replied photo compatibility when the current message also has video media', () => {
+    const input = resolver.resolve({
+      command: '!stiker', args: '', modifier: 'crop',
+      reply: { media: { url: 'http://x/photo.jpg', mimetype: 'image/jpeg' } },
+      media: { url: 'http://x/current.mp4', mimetype: 'video/mp4' },
+    });
+    expect(input?.type).toBe('image');
+    expect(input?.source).toBe('reply');
+    expect(input?.content.mediaUrl).toBe('http://x/photo.jpg');
+  });
   it('!stiker + teks langsung -> text/direct', () => {
     const input = resolver.resolve({
       command: '!stiker', args: 'halo', senderName: 'Budi', senderId: '1',
@@ -249,4 +259,3 @@ describe('InputResolver', () => {
     });
   });
 });
-

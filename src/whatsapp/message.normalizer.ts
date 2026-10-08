@@ -1,6 +1,7 @@
 import { WAHAPayload, WahaMessage, NormalizedMessage } from './types';
 import { isCommand } from '../commands/parser';
 import { logger } from '../observability/logger';
+import { firstMessageTimestamp } from './message-time';
 
 export class MessageNormalizer {
   // Nama tampil: pushName dari WAHA bila ada, fallback ke id pengirim.
@@ -25,7 +26,9 @@ export class MessageNormalizer {
 
     const normalized: NormalizedMessage = {
       eventId: `${payload.session}_${payload.payload.id}`,
+      session: payload.session,
       messageId: msg.id,
+      timestamp: firstMessageTimestamp(msg.timestamp, msg._data?.timestamp, msg._data?.t, msg._data?.messageTimestamp),
       chatId: msg.from,
       senderId,
       senderName: MessageNormalizer.displayName(msg.notifyName || msg._data?.notifyName, senderId),
@@ -38,6 +41,12 @@ export class MessageNormalizer {
       const quoted = MessageNormalizer.resolveReplySender(msg, reply, isGroup);
       normalized.reply = {
         messageId: reply.id,
+        timestamp: firstMessageTimestamp(
+          reply.timestamp,
+          reply._data?.timestamp, reply._data?.t, reply._data?.messageTimestamp,
+          msg._data?.quotedMsg?.timestamp, msg._data?.quotedMsg?.t, msg._data?.quotedMsg?.messageTimestamp,
+          msg._data?.quotedMessage?.timestamp, msg._data?.quotedMessage?.messageTimestamp,
+        ),
         body: reply.body,
         senderId: quoted.id,
         senderName: quoted.name,

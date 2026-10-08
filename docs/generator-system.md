@@ -72,7 +72,7 @@ Lokasi: `src/stickers/background-removal/`
 
 Arsitektur swappable melalui interface `BackgroundRemovalProvider`:
 - `DisabledBackgroundRemovalProvider`: Menolak dengan aman (`FEATURE_DISABLED`) jika belum diaktifkan.
-- `LocalBackgroundRemovalProvider`: Basic local background removal berbasis sampel warna pojok dan jarak warna RGBA; optimal untuk latar belakang sederhana atau mendekati seragam.
+- `LocalBackgroundRemovalProvider`: Provider bawaan dengan model U²-NetP yang disertakan di repository. Memisahkan subjek foto melalui ONNX Runtime Web pada worker CPU, tanpa upload atau unduhan model saat request. Inferensi satu worker dibatasi deadline dan bisa dibatalkan; PNG yang sudah transparan mempertahankan alpha aslinya.
 - `ApiBackgroundRemovalProvider`: Menghubungi endpoint API eksternal yang dikonfigurasi melalui variabel lingkungan (`BACKGROUND_REMOVAL_API_URL`), terlindungi dari SSRF (URL tidak dikontrol user) dengan batas payload streaming (`BACKGROUND_REMOVAL_MAX_RESPONSE_BYTES`).
 
 Fitur turunan:

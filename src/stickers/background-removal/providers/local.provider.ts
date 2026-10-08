@@ -3,68 +3,86 @@ import { BackgroundRemovalProvider, BackgroundRemovalOptions } from '../types';
 import env from '../../../config/env';
 import { AppError } from '../../../errors/app-error';
 import { ErrorCode } from '../../../errors/error-codes';
+import { inferForegroundMask, MODEL_EDGE } from '../inference-worker';
+
+// Sticker output is 512px; 1024px preserves edges while avoiding a second
+// full-resolution RGBA allocation for a 25MP photograph.
+const OUTPUT_EDGE = 1024;
+const MEAN = [0.485, 0.456, 0.406];
+const STD = [0.229, 0.224, 0.225];
 
 export class LocalBackgroundRemovalProvider implements BackgroundRemovalProvider {
   readonly name = 'local';
 
-  async removeBackground(input: Buffer, options?: BackgroundRemovalOptions): Promise<Buffer> {
-    if (options?.signal?.aborted) {
-      throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan');
+  async removeBackground(input: Buffer, options: BackgroundRemovalOptions = {}): Promise<Buffer> {
+    const deadline = Date.now() + (options.timeoutMs ?? env.backgroundRemovalTimeoutMs);
+    const checkDeadline = () => {
+      if (options.signal?.aborted || Date.now() >= deadline) {
+        throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Pemrosesan background dibatalkan atau melewati batas waktu');
+      }
+    };
+    checkDeadline();
+
+    const { data, info } = await sharp(input, {
+      limitInputPixels: env.backgroundRemovalMaxPixels,
+      failOn: 'warning',
+    })
+      .rotate()
+      .resize(OUTPUT_EDGE, OUTPUT_EDGE, { fit: 'inside', withoutEnlargement: true })
+      .toColourspace('srgb')
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    checkDeadline();
+
+    // Existing cutouts already have the correct mask. Keep their transparent
+    // edges and details instead of asking the model to segment them again.
+    let transparentPixels = 0;
+    const cutoutThreshold = info.width * info.height * 0.01;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 16) transparentPixels++;
+      if (transparentPixels > cutoutThreshold) break;
     }
+    if (transparentPixels <= cutoutThreshold) {
+      const rgb = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+        .flatten({ background: 'white' })
+        .resize(MODEL_EDGE, MODEL_EDGE, { fit: 'fill', kernel: 'lanczos3' })
+        .raw()
+        .toBuffer();
+      checkDeadline();
 
-    // WAJIB: tanpa limitInputPixels, gambar 16384x16384 di-decode jadi ~1 GB
-    // raw RGBA, lalu `new Buffer(data)` di bawah menambah salinan kedua.
-    const sharpImg = sharp(input, { limitInputPixels: env.backgroundRemovalMaxPixels, failOn: 'warning' })
-      .ensureAlpha();
-    const { data, info } = await sharpImg.raw().toBuffer({ resolveWithObject: true });
-    const { width, height, channels } = info;
-
-    // Sample corner pixels to estimate background color
-    const corners = [
-      0, // top-left
-      (width - 1) * channels, // top-right
-      ((height - 1) * width) * channels, // bottom-left
-      ((height - 1) * width + (width - 1)) * channels, // bottom-right
-    ];
-
-    let bgR = 0, bgG = 0, bgB = 0;
-    for (const c of corners) {
-      bgR += data[c];
-      bgG += data[c + 1];
-      bgB += data[c + 2];
-    }
-    bgR = Math.round(bgR / corners.length);
-    bgG = Math.round(bgG / corners.length);
-    bgB = Math.round(bgB / corners.length);
-
-    const threshold = 35;
-    // `data` sudah dipegang sharp sebagai buffer milik kita; tulis ulang alpha
-    // secara in-place. `Buffer.from(data)` di sini berarti alokasi kedua sebesar
-    // penuh (mis. 100 MB pada 25 MP) hanya untuk menulis byte yang sama.
-    const out = data;
-
-    if (options?.signal?.aborted) {
-      throw new AppError(ErrorCode.PROCESSING_TIMEOUT, 'Job dibatalkan');
-    }
-
-    for (let i = 0; i < out.length; i += channels) {
-      const r = out[i];
-      const g = out[i + 1];
-      const b = out[i + 2];
-
-      const diff = Math.sqrt(
-        (r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2
-      );
-
-      if (diff < threshold) {
-        out[i + 3] = 0; // set alpha to 0
+      // U²-NetP uses NCHW RGB, scaled by the image maximum and ImageNet
+      // means/stddevs, matching the published model's preprocessing.
+      const plane = MODEL_EDGE * MODEL_EDGE;
+      const tensor = new Float32Array(3 * plane);
+      let max = 1;
+      for (const value of rgb) max = Math.max(max, value);
+      for (let i = 0; i < plane; i++) {
+        for (let channel = 0; channel < 3; channel++) {
+          tensor[channel * plane + i] = (rgb[i * 3 + channel] / max - MEAN[channel]) / STD[channel];
+        }
+      }
+      const mask = await inferForegroundMask(tensor, options, deadline);
+      checkDeadline();
+      const alpha = await sharp(mask, { raw: { width: MODEL_EDGE, height: MODEL_EDGE, channels: 1 } })
+        .resize(info.width, info.height, { fit: 'fill', kernel: 'lanczos3' })
+        .toColourspace('b-w')
+        .raw()
+        .toBuffer();
+      checkDeadline();
+      for (let i = 0; i < alpha.length; i++) {
+        // Tiny probability noise in the background would count as visible
+        // content when fitting the subject. Keep real soft edges, clear only
+        // the near-transparent floor, and make the subject interior opaque.
+        const predictedAlpha = alpha[i] < 5 ? 0 : alpha[i] > 250 ? 255 : alpha[i];
+        data[i * 4 + 3] = Math.round(data[i * 4 + 3] * predictedAlpha / 255);
       }
     }
 
-    return sharp(out, {
-      raw: { width, height, channels },
-    })
+    const output = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
       .png()
       .toBuffer();
+    checkDeadline();
+    return output;
   }
 }

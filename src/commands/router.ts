@@ -1,4 +1,6 @@
 import { ParsedCommand } from './parser';
+import { AppError } from '../errors/app-error';
+import { ErrorCode } from '../errors/error-codes';
 
 export type CommandHandler = (command: ParsedCommand, message: any) => Promise<any>;
 
@@ -12,7 +14,7 @@ export class CommandRouter {
   async dispatch(command: ParsedCommand, message: any): Promise<any> {
     const handler = this.handlers.get(command.name.toLowerCase());
     if (!handler) {
-      throw new Error('INVALID_COMMAND');
+      throw new AppError(ErrorCode.INVALID_COMMAND, 'Unknown command');
     }
     return handler(command, message);
   }

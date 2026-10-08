@@ -12,6 +12,9 @@ import { GeneratorContext, GeneratorInput } from './generators/types';
 import { JobManager, defaultJobManager, JobType } from './jobs/job-manager';
 import { hashIdentifier } from '../observability/privacy';
 import { resolveMentionDisplayNames } from '../whatsapp/mention-display';
+import Sharp from 'sharp';
+
+const MAX_STATIC_STICKER_BYTES = 100 * 1024;
 
 export class StickerService {
   private inputResolver = new InputResolver();
@@ -37,16 +40,18 @@ export class StickerService {
     args: string;
     modifier?: string;
     options?: Record<string, unknown>;
-    reply?: { body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
+    reply?: { messageId?: string; timestamp?: number; body?: string; senderId?: string; senderName?: string; media?: { url?: string; mimetype?: string } };
     media?: { url?: string; mimetype?: string };
     chatId: string;
     senderId: string;
     senderName?: string;
+    messageId?: string;
+    timestamp?: number;
     isGroup: boolean;
     session?: string;
   }): Promise<ProcessingResult | null> {
-    const { command, args, modifier, options, reply, media, senderName, senderId, chatId, session } = normalizedMessage;
-    const input = this.inputResolver.resolve({ command, args, modifier, options, reply, media, senderName, senderId });
+    const { command, args, modifier, options, reply, media, senderName, senderId, chatId, session, messageId, timestamp, isGroup } = normalizedMessage;
+    const input = this.inputResolver.resolve({ command, args, modifier, options, reply, media, senderName, senderId, messageId, timestamp });
 
     if (!input) {
       throw new AppError(ErrorCode.UNSUPPORTED_INPUT, 'Unsupported input type');
@@ -69,6 +74,7 @@ export class StickerService {
       senderId,
       senderName,
       session,
+      isGroup,
       wahaClient: this.wahaClient,
     };
 
@@ -158,13 +164,31 @@ export class StickerService {
       subject: ['🎯'],
       outline: ['⭐'],
     };
-    try {
-      const buffer = await addStickerExif(result.buffer, { emojis: emojis[inputType] || ['🤖'] });
-      return { ...result, buffer, size: buffer.length };
-    } catch (err) {
-      logger.warn('Gagal menempel EXIF pack, kirim tanpa metadata', { error: String(err) });
-      return result;
+    const pack = { emojis: emojis[inputType] || ['🤖'] };
+    const attachPack = async (input: Buffer): Promise<Buffer> => {
+      try {
+        return await addStickerExif(input, pack);
+      } catch (err) {
+        logger.warn('Gagal menempel EXIF pack, kirim tanpa metadata', { error: String(err) });
+        return input;
+      }
+    };
+    let buffer = await attachPack(result.buffer);
+    // WhatsApp's static sticker limit includes the final pack metadata. Only
+    // recompress oversized images; text and existing small stickers stay crisp.
+    if (buffer.length > MAX_STATIC_STICKER_BYTES) {
+      for (const quality of [85, 65, 45, 25, 10, 1]) {
+        const encoded = await Sharp(result.buffer).webp({ quality, alphaQuality: 100, effort: 4 }).toBuffer();
+        buffer = await attachPack(encoded);
+        if (buffer.length <= MAX_STATIC_STICKER_BYTES) break;
+      }
+      if (buffer.length > MAX_STATIC_STICKER_BYTES) {
+        throw new AppError(ErrorCode.MEDIA_TOO_LARGE, 'Hasil stiker melebihi 100 KB', {
+          userMessage: '❌ Gambar terlalu kompleks untuk stiker 100 KB. Coba gambar dengan detail lebih sederhana.',
+        });
+      }
     }
+    return { ...result, buffer, size: buffer.length };
   }
 
   private getTimeout(inputType: string): number {

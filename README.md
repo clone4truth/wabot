@@ -92,6 +92,30 @@ git push -u origin main
 
 ## Resource Tuning (penting untuk VPS kecil)
 
+### Remove background tanpa API key
+
+`!stiker removebg`, `!stiker subject`, dan `!stiker outline` aktif secara bawaan
+melalui `BACKGROUND_REMOVAL_PROVIDER=local`. Model AI U²-NetP (4,6 MB) sudah
+disertakan di `assets/background-removal`, sehingga foto diproses offline tanpa
+API key atau unduhan model saat command dijalankan. Gambar yang sudah transparan
+mempertahankan mask aslinya. Subjek dipasang di kanvas stiker 512×512; outline
+mengikuti tepi subjek, dengan pilihan `white`, `black`, atau `gold`.
+
+Inferensi berjalan di worker terpisah dengan satu thread CPU, mendukung pembatalan
+dan timeout, serta berbagi satu sesi model. Worker yang tidak terpakai dilepas
+setelah 30 detik. Pada pengujian foto 512×512, proses memakai sekitar 414 MB RSS;
+pertahankan `MAX_BACKGROUND_JOBS=1` untuk VPS kecil. Model ringan ini dapat kurang
+rapi pada rambut halus, kaca, atau objek yang menyatu dengan latar kompleks.
+
+Untuk layanan segmentasi lain, pilih `BACKGROUND_REMOVAL_PROVIDER=api` dan set
+`BACKGROUND_REMOVAL_API_URL`. Endpoint menerima `POST` body byte gambar mentah
+(`application/octet-stream`) dan harus mengembalikan PNG/WebP/JPEG; gunakan
+PNG/WebP dengan alpha untuk hasil transparan. `BACKGROUND_REMOVAL_API_KEY` dikirim
+sebagai Bearer token jika diisi. `disabled` tetap tersedia untuk mematikan fitur.
+Docker Compose meneruskan pengaturan provider dan batas `BACKGROUND_REMOVAL_*`
+dari `.env`. Lisensi dan checksum model ada di
+[dokumentasi aset](assets/background-removal/README.md).
+
 Bawaan library bisa membuat bot melampaui kapasitas VPS. Nilai berikut sudah
 di-tuning di dalam kode dan bisa diubah lewat environment:
 

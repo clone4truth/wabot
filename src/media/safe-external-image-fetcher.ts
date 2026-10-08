@@ -114,6 +114,7 @@ export interface SafeRequestOptions {
    * streaming dan menghancurkan koneksi saat habis.
    */
   timeoutMs: number;
+  signal?: AbortSignal;
   /** Batas byte body; transport harus dihancurkan bila terlampaui. */
   maxBytes: number;
 }
@@ -150,7 +151,10 @@ export const defaultSafeFetcherDeps: SafeFetcherDependencies = {
       }, Math.max(0, options.timeoutMs));
       if (typeof (timer as any).unref === 'function') (timer as any).unref();
 
-      const clearTimer = () => clearTimeout(timer);
+      const clearTimer = () => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abortTransport);
+      };
 
       const req = https.request(
         {
@@ -193,6 +197,11 @@ export const defaultSafeFetcherDeps: SafeFetcherDependencies = {
         }
       });
 
+      const abortTransport = () => req.destroy(
+        options.signal?.reason instanceof Error ? options.signal.reason : new Error('Avatar fetch aborted'),
+      );
+      options.signal?.addEventListener('abort', abortTransport, { once: true });
+      if (options.signal?.aborted) { abortTransport(); return; }
       req.end();
     });
   },
@@ -209,6 +218,7 @@ export interface FetchedImage {
 
 export interface SafeFetchOptions {
   timeoutMs?: number;
+  signal?: AbortSignal;
   maxBytes?: number;
   maxPixels?: number;
   /** Internal: dependency injection untuk test deterministik. Bukan API user-facing. */
@@ -223,7 +233,26 @@ export async function fetchExternalImageSafe(
   rawUrl: string,
   opts?: SafeFetchOptions,
 ): Promise<FetchedImage | null> {
-  return doFetch(rawUrl, opts ?? {}, 0, opts?.deps ?? defaultSafeFetcherDeps);
+  if (opts?.signal?.aborted) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('Avatar network timeout')), Math.max(0, opts?.timeoutMs ?? 5_000));
+  if (typeof timer.unref === 'function') timer.unref();
+  const signal = opts?.signal ? AbortSignal.any([controller.signal, opts.signal]) : controller.signal;
+  let onAbort: (() => void) | undefined;
+  try {
+    // DNS and redirects share the same budget; no request starts after it ends.
+    return await Promise.race([
+      doFetch(rawUrl, { ...opts, signal }, 0, opts?.deps ?? defaultSafeFetcherDeps),
+      new Promise<null>((resolve) => {
+        onAbort = () => resolve(null);
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 async function validateAndNormalize(
@@ -270,7 +299,7 @@ async function doFetch(
   redirectCount: number,
   deps: SafeFetcherDependencies,
 ): Promise<FetchedImage | null> {
-  if (redirectCount > MAX_REDIRECTS) return null;
+  if (redirectCount > MAX_REDIRECTS || opts.signal?.aborted) return null;
 
   // 1. Parse URL
   let parsed: URL;
@@ -303,7 +332,7 @@ async function doFetch(
     return null;
   }
 
-  if (!addresses || addresses.length === 0) return null;
+  if (!addresses || addresses.length === 0 || opts.signal?.aborted) return null;
 
   // 6. DNS POLICY (terdokumentasi, dipilih eksplisit):
   //    resolve semua → discard non-publik → wajib ≥1 publik → pin SATU alamat
@@ -337,10 +366,12 @@ async function doFetch(
     path: parsed.pathname + parsed.search,
     headers,
     timeoutMs,
+    signal: opts.signal,
     maxBytes,
   }).catch(() => null);
 
   if (!response) return null;
+  if (opts.signal?.aborted) { response.destroy(); return null; }
 
   const status = response.statusCode;
 
@@ -381,8 +412,8 @@ async function doFetch(
   }
 
   // Baca body dengan batas byte aktual; hancurkan transport saat overflow.
-  const rawBuffer = await readLimitedBody(response, maxBytes);
-  if (!rawBuffer) return null;
+  const rawBuffer = await readLimitedBody(response, maxBytes, opts.signal);
+  if (!rawBuffer || opts.signal?.aborted) return null;
 
   // 8. Sharp validation + normalize
   return validateAndNormalize(rawBuffer, maxPixels);
@@ -391,6 +422,7 @@ async function doFetch(
 function readLimitedBody(
   response: SafeHttpResponse,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
@@ -400,8 +432,16 @@ function readLimitedBody(
     const finish = (value: Buffer | null) => {
       if (finished) return;
       finished = true;
+      signal?.removeEventListener('abort', onAbort);
       resolve(value);
     };
+
+    const onAbort = () => {
+      response.destroy();
+      finish(null);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
 
     response.stream.on('data', (chunk: Buffer) => {
       if (finished) return;
