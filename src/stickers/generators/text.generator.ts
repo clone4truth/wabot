@@ -5,6 +5,7 @@ import { QuoteProcessor } from '../processors/quote.processor';
 import { BubbleProcessor } from '../processors/bubble.processor';
 import { firstHumanDisplayName } from '../../whatsapp/display-name';
 import { formatMessageTime, normalizeMessageTimestamp } from '../../whatsapp/message-time';
+import { getRememberedMessageTimestamp } from '../../whatsapp/message-timestamp-cache';
 import { WahaLookupOptions } from '../../whatsapp/waha.client';
 import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
@@ -136,11 +137,13 @@ export class TextGenerator implements StickerGenerator {
 
   private async resolveBubbleTime(content: Record<string, unknown>, context: GeneratorContext, options?: WahaLookupOptions): Promise<string> {
     let timestamp = normalizeMessageTimestamp(content.timestamp);
-    if (timestamp === undefined && content.timestampSource === 'reply' &&
-        typeof content.messageId === 'string' && context.wahaClient) {
-      timestamp = await optionalLookup(() => context.wahaClient!.getMessageTimestamp(
-        context.chatId, content.messageId as string, context.session, options,
-      ), options?.signal, undefined);
+    if (timestamp === undefined && content.timestampSource === 'reply' && typeof content.messageId === 'string') {
+      timestamp = getRememberedMessageTimestamp(context.session, context.chatId, content.messageId);
+      if (timestamp === undefined && context.wahaClient) {
+        timestamp = await optionalLookup(() => context.wahaClient!.getMessageTimestamp(
+          context.chatId, content.messageId as string, context.session, options,
+        ), options?.signal, undefined);
+      }
     }
     return formatMessageTime(timestamp);
   }

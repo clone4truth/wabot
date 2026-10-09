@@ -25,6 +25,7 @@ import { ProcessingResult } from '../stickers/result';
 import env from '../config/env';
 import { logger } from '../observability/logger';
 import { hashIdentifier } from '../observability/privacy';
+import { rememberMessageTimestamp } from '../whatsapp/message-timestamp-cache';
 
 const verifier = new WebhookVerifier();
 const normalizer = new MessageNormalizer();
@@ -90,6 +91,7 @@ export async function webhookController(request: FastifyRequest, reply: FastifyR
     }
 
     const message = normalizer.normalize(payload);
+    rememberMessageTimestamp(message.session, message.chatId, message.messageId, message.timestamp);
 
     logger.info('Incoming message', {
       requestId: request.id,

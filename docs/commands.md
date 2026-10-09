@@ -87,9 +87,10 @@ pesan sendiri berwarna hijau di kanan; reply pesan orang lain berwarna gelap di
 kiri. Ekor bubble mengikuti arahnya. Nama/avatar pengirim hanya muncul pada
 pesan masuk di grup; chat pribadi dan pesan sendiri tidak memiliki header itu.
 Reply tanpa teks tambahan memakai waktu pesan yang direply; teks langsung
-memakai waktu command. Timestamp yang tidak ada di webhook
-dicari dari pesan asli melalui WAHA. Jika tetap tidak tersedia, jam tampil
-`--:--`. Zona waktu default `Asia/Jakarta`; gunakan environment `TZ` untuk
+memakai waktu command. Timestamp pesan disimpan sementara dari webhook selama
+24 jam, sehingga waktu reply tetap tersedia saat API WAHA tidak bisa diakses.
+Jika pesan lama tidak ada di cache, bot mencoba mengambilnya melalui WAHA. Jika
+tetap tidak tersedia, jam tampil `--:--`. Zona waktu default `Asia/Jakarta`; gunakan environment `TZ` untuk
 menyesuaikan zona waktu perangkat WhatsApp.
 
 Stiker tetap 512×512. Font dipilih sebesar mungkin sesuai ruang yang tersedia;
