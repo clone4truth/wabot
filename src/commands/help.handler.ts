@@ -21,13 +21,16 @@ export function handleHelp(topic?: string, prefix: string = env.commandPrefix): 
     // Check if it's a specific command
     const cmd = findCommand(cleanTopic);
     if (cmd) {
+      const contactHelp = cmd.name === 'kontak' || cmd.name === 'stiker bubble' || cmd.name === 'stiker quote'
+        ? '\n\n*Nama kontak pribadi:*\nReply pesan lalu !kontak nama Kak Rara.\nLihat: !kontak; hapus: !kontak hapus.\nNama pilihanmu berlaku pada bubble dan quote yang kamu buat. Tanpa alias, nama mengikuti kontak akun bot.'
+        : '';
       return formatCommandExamples([
         `📖 *Bantuan Command: ${cmd.name}*`,
         '',
         `*Penggunaan:* \`${cmd.usage}\``,
         `*Kategori:* ${cmd.category}`,
         `*Penjelasan:* ${cmd.description}`,
-      ].join('\n'), prefix);
+      ].join('\n') + contactHelp, prefix);
     }
 
     return formatCommandExamples(`❌ Topik "${cleanTopic}" tidak ditemukan.\nKetik !menu untuk daftar perintah atau !help untuk panduan.`, prefix);
@@ -58,6 +61,8 @@ export function handleHelp(topic?: string, prefix: string = env.commandPrefix): 
     '  - `!attp <teks>` atau `!attp effect <preset> <teks>` (preset: rainbow, fade, zoom, blink, slide, bounce)',
     '  - Reply chat lalu `!stiker quote` (kutipan nama) / `!stiker bubble` (nama dan waktu pesan asli)',
     '  - Teks langsung: `!stiker bubble Halo` atau `!stiker quote Halo`',
+    '  - Reply pesan lalu `!kontak nama Kak Rara` → Nama kontak pilihanmu untuk bubble dan quote',
+    '  - `!kontak` untuk melihat alias / `!kontak hapus` untuk menghapus alias (reply pesan)',
     '',
     '• *Konversi*:',
     '  - `!toimg` (reply stiker statis)',

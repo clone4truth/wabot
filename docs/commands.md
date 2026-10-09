@@ -73,6 +73,28 @@ Ketik `!prefix` untuk melihat prefix atau `!prefix ?` untuk menggantinya
 | `!ping` | Bebas | Cek status server dan latensi bot |
 | `!prefix [simbol]` | Opsional simbol baru (grup: admin) | Lihat prefix aktif atau ubah prefix perintah (misal: `!prefix ?`) |
 | `!job` | Bebas | Melihat antrean / status proses stiker aktif milik pengirim |
+| `!kontak` | Reply pesan | Lihat nama kontak pilihanmu untuk pengirim pesan itu |
+| `!kontak nama <nama>` | Reply pesan | Simpan/ganti nama kontak pribadimu untuk bubble dan quote |
+| `!kontak hapus` | Reply pesan | Hapus nama kontak pilihanmu untuk pengirim pesan itu |
+
+## Nama kontak pribadi
+
+Reply pesan Rara, kirim `!kontak nama Kak Rara`, lalu reply pesannya lagi dengan
+`!stiker bubble`. Bubble yang kamu buat akan memakai nama "Kak Rara". Pengguna
+lain dapat menyimpan "Rara Kantor" untuk orang yang sama; masing-masing memakai
+alias miliknya sendiri. Alias juga dipakai pada nama kutipan di dalam bubble dan
+stiker `!stiker quote`.
+
+Alias berlaku lintas chat pada sesi bot yang sama, disimpan di `DATA_DIR`, dan
+bertahan setelah restart selama volume data tetap tersedia. Nama maksimal
+32 karakter, dengan maksimal 200 kontak pribadi per pengguna. `!kontak` untuk
+melihat alias dan `!kontak hapus` untuk menghapusnya; keduanya harus reply pesan
+orang tersebut. Semua contoh mengikuti prefix aktif di chat.
+
+Bot tidak membaca daftar kontak pribadi di ponsel peminta. Tanpa alias, nama
+tetap mengikuti kontak akun bot, dengan fallback nama profil yang tersedia.
+Foto, identitas pengirim, waktu pesan asli, serta arah bubble tetap berasal dari
+pesan tersebut; alias hanya mengganti label nama pada hasil yang kamu buat.
 
 ## Ukuran dan keterbacaan
 

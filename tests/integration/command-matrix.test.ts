@@ -75,6 +75,7 @@ const cases: CommandCase[] = [
   ...['ONLINE', 'OFFLINE', 'LIVE', 'ERROR', 'SUCCESS'].map((badge) => ({ command: `!badge ${badge}`, metadata: 'badge' })),
   { command: '!toimg', metadata: 'toimg', fixture: 'static.webp', output: 'image' },
   { command: '!togif', metadata: 'togif', fixture: 'animated.webp', output: 'video' },
+  { command: '!kontak nama Kak Rara', metadata: 'kontak', replyText: 'Pesan Rara', output: 'text' },
   ...['!menu', '!help', '!help effects', '!template list', '!template info terminal', '!ping', '!prefix', '!job'].map((command): CommandCase => ({
     command, metadata: command.slice(1).split(' ')[0], output: 'text',
   })),

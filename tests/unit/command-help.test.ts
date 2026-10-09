@@ -36,6 +36,13 @@ describe('Command guidance', () => {
     expect(handleHelp(undefined, '$')).not.toContain('!help');
   });
 
+  it.each(['kontak', 'bubble', 'quote'])('explains personal aliases in %s help with the active prefix', (topic) => {
+    const help = handleHelp(topic, '?');
+    expect(help).toContain('?kontak nama Kak Rara');
+    expect(help).toContain('?kontak hapus');
+    expect(help).not.toContain('!kontak');
+  });
+
   it('reports an unknown help topic with a usable menu command', () => {
     expect(handleHelp('bubblle', '?')).toContain('Topik "bubblle" tidak ditemukan');
     expect(handleHelp('bubblle', '?')).toContain('?menu');

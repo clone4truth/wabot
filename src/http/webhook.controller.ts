@@ -16,6 +16,7 @@ import { handleHelp } from '../commands/help.handler';
 import { handlePing } from '../commands/ping.handler';
 import { handleTemplateCommand } from '../commands/template.handler';
 import { handleJobCommand } from '../commands/job.handler';
+import { handleContactCommand } from '../commands/contact.handler';
 import { formatCommandExamples } from '../commands/metadata';
 import { WAHAClient } from '../whatsapp/waha.client';
 import { AccessGuard } from '../security/access';
@@ -207,6 +208,9 @@ async function dispatchCommand(parsed: NonNullable<ReturnType<typeof parseComman
       break;
     case 'prefix':
       await handlePrefixCommand(message, parsed.args.trim(), replyTo);
+      break;
+    case 'kontak':
+      await wahaClient.sendText(message.chatId, handleContactCommand(parsed.args, message, prefix), replyTo);
       break;
     default:
       let result: ProcessingResult | null | undefined;

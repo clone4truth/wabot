@@ -29,7 +29,7 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   // Text
   { name: 'stiker teks', aliases: ['teks'], description: 'Paksa pembuatan stiker teks', usage: '!stiker teks <teks>', category: 'Text' },
   { name: 'stiker quote', aliases: ['quote'], description: 'Stiker kutipan berbingkai nama pengirim; reply chat atau isi teks langsung', usage: '!stiker quote [teks]', category: 'Text' },
-  { name: 'stiker bubble', aliases: ['bubble'], description: 'Chat bubble WhatsApp; reply chat untuk memakai nama dan waktu pesan asli', usage: '!stiker bubble [teks]', category: 'Text' },
+  { name: 'stiker bubble', aliases: ['bubble'], description: 'Chat bubble WhatsApp dengan waktu asli; atur nama pilihanmu melalui !kontak', usage: '!stiker bubble [teks]', category: 'Text' },
   { name: 'ttp', description: 'Teks ke gambar dengan gaya preset (gradient/dark/gold/terminal/neon/minimal)', usage: '!ttp <teks> atau !ttp style <preset> <teks>', category: 'Text' },
   { name: 'ttp --image', description: 'Buat gambar PNG 1024×1024 dengan teks besar, bisa dibuka penuh', usage: '!ttp --image [style <preset>] <teks>', category: 'Text' },
 
@@ -52,6 +52,7 @@ export const COMMAND_REGISTRY: CommandMetadata[] = [
   { name: 'ping', description: 'Cek latensi dan status bot', usage: '!ping', category: 'Utility' },
   { name: 'prefix', description: 'Lihat atau ubah prefix bot; perubahan di grup hanya untuk admin', usage: '!prefix [simbol]', category: 'Utility' },
   { name: 'job', description: 'Cek status proses stiker aktif', usage: '!job', category: 'Utility' },
+  { name: 'kontak', description: 'Reply pesan untuk melihat, menyimpan, atau menghapus nama kontak pribadimu pada bubble dan quote', usage: '!kontak [nama <nama>|hapus] (reply pesan)', category: 'Utility' },
 ];
 
 export function findCommand(query: string): CommandMetadata | undefined {
@@ -77,5 +78,5 @@ export function getCommandsByCategory(category: string): CommandMetadata[] {
 
 /** Apply the chat's active prefix to command examples, preserving other text. */
 export function formatCommandExamples(text: string, prefix: string): string {
-  return text.replace(/!(?=(?:stiker|ttp|attp|toimg|togif|template|emoji|badge|menu|help|ping|prefix|job)\b)/g, () => prefix);
+  return text.replace(/!(?=(?:stiker|ttp|attp|toimg|togif|template|emoji|badge|menu|help|ping|prefix|job|kontak)\b)/g, () => prefix);
 }

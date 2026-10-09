@@ -10,6 +10,7 @@ import { WahaLookupOptions } from '../../whatsapp/waha.client';
 import env from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
+import { ContactAliasStore, contactAliases } from '../../whatsapp/contact-aliases';
 
 interface ResolvedPerson {
   savedName?: string;
@@ -32,6 +33,8 @@ function optionalLookup<T>(request: () => Promise<T>, signal: AbortSignal | unde
 export class TextGenerator implements StickerGenerator {
   readonly name = 'text';
 
+  constructor(private readonly aliases: ContactAliasStore = contactAliases) {}
+
   private plainTextProcessor = new TextStickerProcessor();
   private quoteProcessor = new QuoteProcessor();
   private bubbleProcessor = new BubbleProcessor();
@@ -50,7 +53,7 @@ export class TextGenerator implements StickerGenerator {
     if (modifier === 'quote') {
       const senderId = (content.senderId as string) ?? context.senderId;
       const person = await this.resolvePeople([senderId], context).then((people) => people.get(senderId));
-      const senderName = firstHumanDisplayName(
+      const senderName = this.aliases.get(context.senderId, senderId, context.session) ?? firstHumanDisplayName(
         [person?.savedName, person?.info?.name, content.senderName, context.senderName],
         'Pengguna WhatsApp',
       );
@@ -101,14 +104,14 @@ export class TextGenerator implements StickerGenerator {
       const sender = senderId ? byId.get(senderId) : undefined;
       const quotedRes = quotedSenderId ? byId.get(quotedSenderId) : undefined;
 
-      const senderName = showSenderName ? firstHumanDisplayName(
+      const senderName = showSenderName ? this.aliases.get(context.senderId, senderId, context.session) ?? firstHumanDisplayName(
         [sender?.savedName, sender?.info?.name, content.senderName,
           content.timestampSource === 'reply' ? undefined : context.senderName],
         'Pengguna WhatsApp',
       ) : undefined;
       const quoted = content.quotedBody
         ? {
-            senderName: firstHumanDisplayName(
+            senderName: this.aliases.get(context.senderId, quotedSenderId, context.session) ?? firstHumanDisplayName(
               [quotedRes?.savedName, quotedRes?.info?.name, content.quotedSenderName],
               'Pengguna WhatsApp',
             )!,
