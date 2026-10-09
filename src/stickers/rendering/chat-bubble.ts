@@ -4,6 +4,7 @@ import { AppError } from '../../errors/app-error';
 import { ErrorCode } from '../../errors/error-codes';
 import { wrapWords, splitGraphemes } from './text-utils';
 import { escapePangoMarkup } from './text-layout';
+import { UNKNOWN_MESSAGE_TIME } from '../../whatsapp/message-time';
 
 const NAME_COLORS = ['#e542a3', '#e7b75b', '#a5b337', '#1fa855', '#53bdeb', '#a695e7', '#ff6b6b', '#00a884'];
 const BUBBLE_STYLES = {
@@ -130,9 +131,9 @@ export async function renderChatBubbleToBuffer(options: ChatBubbleOptions): Prom
   const showSenderName = !outgoing && options.showSenderName !== false;
   const style = BUBBLE_STYLES[outgoing ? 'outgoing' : 'incoming'];
   const avatar = showSenderName ? options.avatar : null;
-  const time = options.time ?? new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: process.env.TZ || 'Asia/Jakarta',
-  }).format(new Date());
+  // Never substitute the server clock for a message timestamp. The caller
+  // resolves the original WAHA time; unknown timestamps stay visibly unknown.
+  const time = options.time ?? UNKNOWN_MESSAGE_TIME;
   const canvas = 512;
   const margin = 12;
   const avatarSize = avatar ? 64 : 0;
