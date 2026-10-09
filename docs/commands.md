@@ -89,8 +89,13 @@ pesan masuk di grup; chat pribadi dan pesan sendiri tidak memiliki header itu.
 Reply tanpa teks tambahan memakai waktu pesan yang direply; teks langsung
 memakai waktu command. Timestamp pesan disimpan sementara dari webhook selama
 24 jam, sehingga waktu reply tetap tersedia saat API WAHA tidak bisa diakses.
-Jika pesan lama tidak ada di cache, bot mencoba mengambilnya melalui WAHA. Jika
-tetap tidak tersedia, jam tampil `--:--`. Zona waktu default `Asia/Jakarta`; gunakan environment `TZ` untuk
+ID pendek pada reply dicocokkan dengan ID lengkap pada pesan asli. Jika pesan
+lama tidak ada di cache, bot mengambil waktu pesan lewat WAHA; reply grup WEBJS
+memakai ID lengkap dengan ID pengirim. Jika lookup langsung gagal, bot mencari
+ID yang sama pada 100 pesan terbaru di chat tersebut. Hasil lookup berhasil
+disimpan ke cache agar reply berikutnya tidak perlu lookup ulang. Seluruh lookup
+dibatasi dua detik dan tidak mengunduh media. Jika tetap tidak tersedia, jam
+tampil `--:--`. Zona waktu default `Asia/Jakarta`; gunakan environment `TZ` untuk
 menyesuaikan zona waktu perangkat WhatsApp.
 
 Stiker tetap 512×512. Font dipilih sebesar mungkin sesuai ruang yang tersedia;

@@ -1,4 +1,5 @@
 import { normalizeMessageTimestamp } from './message-time';
+import { messageStanzaId } from './message-id';
 
 interface CachedTimestamp {
   timestamp: number;
@@ -12,7 +13,7 @@ const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
 const timestamps = new Map<string, CachedTimestamp>();
 
 function cacheKey(session: string | undefined, chatId: string, messageId: string): string {
-  return JSON.stringify([session ?? '', chatId, messageId]);
+  return JSON.stringify([session ?? '', chatId, messageStanzaId(messageId)]);
 }
 
 export function rememberMessageTimestamp(

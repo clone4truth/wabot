@@ -83,6 +83,18 @@ describe('MessageNormalizer', () => {
     expect(msg.reply?.body).toBe('halo');
   });
 
+  it('accepts a WEBJS quoted participant represented as a Wid object', () => {
+    const msg = normalizer.normalize(basePayload({
+      from: '999@g.us',
+      replyTo: {
+        id: 'quoted-stanza', body: 'Pesan lama',
+        participant: { server: 'lid', user: '222', _serialized: '222@lid' },
+      },
+    }) as any);
+    expect(msg.reply?.senderId).toBe('222@lid');
+    expect(msg.reply?.senderName).toBe('222');
+  });
+
   it('Reply prefix false_ tanpa participant: quote milik lawan chat', () => {
     const msg = normalizer.normalize(
       basePayload({ notifyName: 'Budi', replyTo: { id: 'false_111@lid_x', body: 'halo' } }) as any,

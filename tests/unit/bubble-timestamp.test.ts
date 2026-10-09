@@ -6,12 +6,15 @@ import { TextGenerator } from '../../src/stickers/generators/text.generator';
 import { GeneratorRegistry } from '../../src/stickers/generators/registry';
 import { JobManager } from '../../src/stickers/jobs/job-manager';
 import { MessageNormalizer } from '../../src/whatsapp/message.normalizer';
+import { rememberMessageTimestamp } from '../../src/whatsapp/message-timestamp-cache';
 
 const commandTime = Date.parse('2026-10-08T06:19:00Z') / 1000;
 const originalTime = Date.parse('2026-10-07T05:45:00Z') / 1000;
 const originalId = 'false_222@c.us_quoted';
+let sequence = 0;
 
 function pipeline() {
+  const replyId = `${originalId}${sequence++}`;
   const generator = new TextGenerator();
   const processBubble = vi.fn().mockResolvedValue({
     buffer: Buffer.from('png'), mimetype: 'image/png', width: 512, height: 512, animated: false, size: 3,
@@ -28,14 +31,14 @@ function pipeline() {
   const service = new StickerService(undefined, registry, new JobManager({ image: 1 }), waha as any);
   const handler = createStikerHandler(service);
   return {
-    processBubble, waha,
+    processBubble, waha, replyId,
     run: async (body: string, replyTo?: Record<string, unknown>, messageFields?: Record<string, unknown>) => {
       const message = new MessageNormalizer().normalize({
         event: 'message', session: 'quoted-session',
         payload: {
           id: 'false_111@c.us_command', timestamp: commandTime, body,
           from: 'group@g.us', participant: '111@c.us', notifyName: 'Budi',
-          ...(replyTo ? { replyTo: { id: originalId, body: 'Pesan lama', participant: '222@c.us', senderName: 'Rara', ...replyTo } } : {}),
+          ...(replyTo ? { replyTo: { id: replyId, body: 'Pesan lama', participant: '222@c.us', senderName: 'Rara', ...replyTo } } : {}),
           ...messageFields,
         },
       });
@@ -134,7 +137,7 @@ describe('bubble timestamp from webhook through command and sticker pipeline', (
     const test = pipeline();
     test.waha.getMessageTimestamp.mockResolvedValue(originalTime as any);
     await test.run('!stiker bubble', {});
-    expect(test.waha.getMessageTimestamp).toHaveBeenCalledWith('group@g.us', originalId, 'quoted-session', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(test.waha.getMessageTimestamp).toHaveBeenCalledWith('group@g.us', test.replyId, 'quoted-session', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(test.processBubble.mock.calls[0][5]).toBe('12:45');
   });
 
@@ -150,5 +153,35 @@ describe('bubble timestamp from webhook through command and sticker pipeline', (
     test.waha.getMessageTimestamp.mockRejectedValue(new Error('message unavailable'));
     await test.run('!stiker bubble', {});
     expect(test.processBubble.mock.calls[0][5]).toBe('--:--');
+  });
+
+  it('uses the cached serialized message time for a bare reply id without calling the API', async () => {
+    const test = pipeline();
+    const stanza = test.replyId.split('_')[2];
+    rememberMessageTimestamp('quoted-session', 'group@g.us', `false_group@g.us_${stanza}_222@lid`, originalTime);
+    await test.run('!stiker bubble', { id: stanza });
+    expect(test.processBubble.mock.calls[0][5]).toBe('12:45');
+    expect(test.waha.getMessageTimestamp).not.toHaveBeenCalled();
+  });
+
+  it('forwards a normalized WEBJS quoted participant to the original message lookup', async () => {
+    const test = pipeline();
+    test.waha.getMessageTimestamp.mockResolvedValue(originalTime as any);
+    await test.run('!stiker bubble', {
+      id: 'WEBJS-LOOKUP', participant: { server: 'lid', user: '222', _serialized: '222@lid' },
+    });
+    expect(test.waha.getMessageTimestamp).toHaveBeenCalledWith('group@g.us', 'WEBJS-LOOKUP', 'quoted-session', expect.objectContaining({ participant: '222@lid' }));
+    expect(test.processBubble.mock.calls[0][5]).toBe('12:45');
+  });
+
+  it('keeps a successful original time lookup for subsequent replies', async () => {
+    const test = pipeline();
+    test.waha.getMessageTimestamp.mockResolvedValue(originalTime as any);
+    await test.run('!stiker bubble', {});
+    test.waha.getMessageTimestamp.mockClear();
+    test.waha.getMessageTimestamp.mockResolvedValue(undefined);
+    await test.run('!stiker bubble', {});
+    expect(test.processBubble.mock.calls[1][5]).toBe('12:45');
+    expect(test.waha.getMessageTimestamp).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,8 @@ export interface WAHAPayload {
   payload: WahaMessage;
 }
 
+type WahaIdentifier = string | { _serialized: string; user?: string; server?: string };
+
 export interface WahaMessage {
   id: string;
   timestamp: number;
@@ -24,8 +26,8 @@ export interface WahaMessage {
     id: string;
     timestamp?: number;
     body?: string;
-    participant?: string;
-    sender?: string;
+    participant?: WahaIdentifier;
+    sender?: WahaIdentifier;
     senderName?: string;
     hasMedia?: boolean;
     media?: {

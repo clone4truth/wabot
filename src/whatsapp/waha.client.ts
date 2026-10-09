@@ -8,6 +8,7 @@ import { fetchExternalImageSafe } from '../media/safe-external-image-fetcher';
 import { discardResponseBody } from '../media/http-body';
 import { firstHumanDisplayName } from './display-name';
 import { firstMessageTimestamp } from './message-time';
+import { messageStanzaId } from './message-id';
 
 /**
  * Response resmi WAHA untuk GET /api/{session}/chats/{chatId}/picture
@@ -24,6 +25,11 @@ export interface WahaPictureResponse {
 export interface WahaLookupOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+}
+
+export interface WahaMessageLookupOptions extends WahaLookupOptions {
+  /** Quoted author, needed to serialize bare WEBJS group message ids. */
+  participant?: string;
 }
 
 function lookupDeadline(options: WahaLookupOptions | undefined, defaultTimeoutMs: number) {
@@ -217,20 +223,42 @@ export class WAHAClient {
 
   // Official Chats API: fetch only the original message metadata, never media.
   // Missing quotes are best-effort; a bounded lookup must not block the sticker.
-  async getMessageTimestamp(chatId: string, messageId: string, session = this.session, options?: WahaLookupOptions): Promise<number | undefined> {
+  async getMessageTimestamp(chatId: string, messageId: string, session = this.session, options?: WahaMessageLookupOptions): Promise<number | undefined> {
     if (!chatId || !messageId) return undefined;
     const deadline = lookupDeadline(options, 2000);
     try {
-      const res = await fetch(
-        `${this.baseUrl}/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}?downloadMedia=false`,
-        { headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal },
-      );
-      if (!res.ok) {
-        discardResponseBody(res);
-        return undefined;
+      const path = `${this.baseUrl}/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages`;
+      const read = async (url: string) => {
+        const res = await fetch(url, {
+          headers: { 'X-Api-Key': this.apiKey }, signal: deadline.signal,
+          size: 4 * 1024 * 1024, redirect: 'error',
+        });
+        if (!res.ok) {
+          discardResponseBody(res);
+          return { status: res.status, data: undefined };
+        }
+        return { status: res.status, data: await res.json() as any };
+      };
+      const stanza = messageStanzaId(messageId);
+      // WEBJS group lookups require a full id, including the quoted author.
+      // Other engines also accept serialized ids. The author may be the bot.
+      const ids = stanza === messageId && chatId.endsWith('@g.us') && options?.participant
+        ? [`false_${chatId}_${stanza}_${options.participant}`, `true_${chatId}_${stanza}_${options.participant}`]
+        : [messageId];
+      for (const id of ids) {
+        const { status, data } = await read(`${path}/${encodeURIComponent(id)}?downloadMedia=false`);
+        if (status === 401 || status === 403) return undefined;
+        const timestamp = firstMessageTimestamp(data?.timestamp, data?._data?.timestamp, data?._data?.t, data?._data?.messageTimestamp);
+        if (timestamp !== undefined) return timestamp;
       }
-      const data = (await res.json()) as any;
-      return firstMessageTimestamp(data?.timestamp, data?._data?.timestamp, data?._data?.t, data?._data?.messageTimestamp);
+
+      // A quote can omit its author or use an older engine id format. Recover
+      // the original by its stanza id, never by text or the latest timestamp.
+      // All attempts share the same deadline; media is never downloaded.
+      const { data: messages } = await read(`${path}?downloadMedia=false&limit=100&sortBy=timestamp&sortOrder=desc`);
+      if (!Array.isArray(messages)) return undefined;
+      const original = messages.find((message) => typeof message?.id === 'string' && messageStanzaId(message.id) === stanza);
+      return firstMessageTimestamp(original?.timestamp, original?._data?.timestamp, original?._data?.t, original?._data?.messageTimestamp);
     } catch {
       return undefined;
     } finally {

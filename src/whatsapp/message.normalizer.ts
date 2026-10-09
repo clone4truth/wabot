@@ -2,6 +2,7 @@ import { WAHAPayload, WahaMessage, NormalizedMessage } from './types';
 import { isCommand } from '../commands/parser';
 import { logger } from '../observability/logger';
 import { firstMessageTimestamp } from './message-time';
+import { readWahaIdentifier } from './message-id';
 
 export class MessageNormalizer {
   // Nama tampil: pushName dari WAHA bila ada, fallback ke id pengirim.
@@ -73,10 +74,11 @@ export class MessageNormalizer {
     reply: NonNullable<WahaMessage['replyTo']>,
     isGroup: boolean,
   ): { id?: string; name: string } {
-    const participant = reply.participant || reply.sender;
+    const participant = readWahaIdentifier(reply.participant) || readWahaIdentifier(reply.sender) ||
+      readWahaIdentifier(msg._data?.quotedParticipant);
     const rawNotify = reply.senderName || (reply as any)._data?.notifyName;
     if (participant) {
-      return { id: participant, name: rawNotify || MessageNormalizer.displayName(undefined, participant) };
+      return { id: participant, name: MessageNormalizer.displayName(rawNotify, participant) };
     }
     if (!isGroup) {
       if (reply.id?.startsWith('true_')) {
